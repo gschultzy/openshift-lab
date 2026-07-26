@@ -1,0 +1,77 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: site-a-metallb-hcp
+  namespace: {{ site_a_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Site-A HCP
+    policy.open-cluster-management.io/categories: Networking
+    policy.open-cluster-management.io/controls: Install MetalLB for HCP
+spec:
+  remediationAction: {{ site_a_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: site-a-metallb-hcp
+        spec:
+          remediationAction: {{ site_a_policy_remediation_action }}
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ site_a_metallb_namespace }}
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: metallb-operator-group
+                  namespace: {{ site_a_metallb_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: metallb-operator
+                  namespace: {{ site_a_metallb_namespace }}
+                spec:
+                  channel: {{ site_a_metallb_subscription_channel }}
+                  installPlanApproval: {{ site_a_metallb_install_plan_approval }}
+                  name: metallb-operator
+                  source: {{ site_a_metallb_operator_source }}
+                  sourceNamespace: {{ site_a_metallb_operator_source_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: metallb.io/v1beta1
+                kind: MetalLB
+                metadata:
+                  name: {{ site_a_metallb_instance_name }}
+                  namespace: {{ site_a_metallb_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: metallb.io/v1beta1
+                kind: IPAddressPool
+                metadata:
+                  name: {{ site_a_metallb_pool_name }}
+                  namespace: {{ site_a_metallb_namespace }}
+                spec:
+                  addresses:
+                    - {{ site_a_hcp_metallb_range }}
+                  autoAssign: true
+                  avoidBuggyIPs: false
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: metallb.io/v1beta1
+                kind: L2Advertisement
+                metadata:
+                  name: {{ site_a_metallb_l2_advertisement_name }}
+                  namespace: {{ site_a_metallb_namespace }}
+                spec:
+                  ipAddressPools:
+                    - {{ site_a_metallb_pool_name }}

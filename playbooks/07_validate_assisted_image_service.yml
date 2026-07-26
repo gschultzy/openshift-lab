@@ -1,0 +1,120 @@
+---
+- name: Validate Assisted Image Service route before booting bare-metal nodes
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  vars:
+    assisted_image_service_host: "assisted-image-service-{{ assisted_image_service_namespace }}.apps.{{ cluster_fqdn }}"
+    assisted_image_service_rootfs_url: "https://{{ assisted_image_service_host }}/boot-artifacts/rootfs?arch=x86_64&version={{ ocp_version }}"
+  tasks:
+    - name: Show Assisted Image Service route expected by bare-metal live ISO
+      ansible.builtin.debug:
+        msg:
+          - "Route host: {{ assisted_image_service_host }}"
+          - "Rootfs URL: {{ assisted_image_service_rootfs_url }}"
+          - "Expected DNS target for hub *.apps: {{ sno_ingress_ip }}"
+          - "Bare-metal nodes use DNS servers: {{ bm_dns_servers | join(', ') }}"
+
+    - name: Check hub apps DNS using the bare-metal DNS server
+      ansible.builtin.shell: |
+        set -o pipefail
+        host="{{ assisted_image_service_host }}"
+        dns="{{ (bm_dns_servers | first) if (bm_dns_servers | length > 0) else (dns_servers | first) }}"
+        if command -v dig >/dev/null 2>&1; then
+          dig +short "@$dns" "$host"
+        elif command -v nslookup >/dev/null 2>&1; then
+          nslookup "$host" "$dns"
+        else
+          getent hosts "$host" || true
+        fi
+      args:
+        executable: /bin/bash
+      register: assisted_route_dns
+      changed_when: false
+
+    - name: Show hub apps DNS result
+      ansible.builtin.debug:
+        var: assisted_route_dns.stdout_lines
+
+    - name: Fail if hub apps DNS does not point at the SNO ingress IP
+      ansible.builtin.assert:
+        that:
+          - "sno_ingress_ip in assisted_route_dns.stdout"
+        fail_msg: >-
+          {{ assisted_image_service_host }} must resolve to {{ sno_ingress_ip }} from the DNS server used by bare-metal nodes.
+          Fix AD DNS for *.apps.{{ cluster_name }}.{{ base_domain }}. If it still points to {{ ingress_vip }},
+          the bare-metal nodes will fail downloading rootfs from Assisted Image Service.
+
+    - name: Wait for Assisted Image Service route
+      ansible.builtin.command: >-
+        oc -n {{ assisted_image_service_namespace }} get route {{ assisted_image_service_route_name }}
+        -o jsonpath='{.spec.host}'
+      register: assisted_image_route
+      changed_when: false
+      retries: 40
+      delay: 15
+      until: assisted_image_route.rc == 0 and assisted_image_route.stdout | length > 0
+
+    - name: Show Assisted Image Service route from OpenShift
+      ansible.builtin.debug:
+        msg: "OpenShift route host is {{ assisted_image_route.stdout }}"
+
+    - name: Wait for Assisted Image Service service endpoints
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc -n {{ assisted_image_service_namespace }} get endpoints {{ assisted_image_service_route_name }} \
+          -o jsonpath='{.subsets[*].addresses[*].ip}'
+      args:
+        executable: /bin/bash
+      register: assisted_image_endpoints
+      changed_when: false
+      retries: 40
+      delay: 15
+      until: assisted_image_endpoints.rc == 0 and assisted_image_endpoints.stdout | trim | length > 0
+
+    - name: Show Assisted Image Service pods, PVCs, service, and route if endpoint wait had issues
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo '# pods'
+        oc -n {{ assisted_image_service_namespace }} get pods -o wide | egrep -i 'assisted|image|service|NAME' || true
+        echo
+        echo '# pvc'
+        oc -n {{ assisted_image_service_namespace }} get pvc || true
+        echo
+        echo '# svc'
+        oc -n {{ assisted_image_service_namespace }} get svc {{ assisted_image_service_route_name }} -o wide || true
+        echo
+        echo '# route'
+        oc -n {{ assisted_image_service_namespace }} get route {{ assisted_image_service_route_name }} -o wide || true
+        echo
+        echo '# endpoints'
+        oc -n {{ assisted_image_service_namespace }} get endpoints {{ assisted_image_service_route_name }} -o yaml || true
+      args:
+        executable: /bin/bash
+      register: assisted_image_diag
+      changed_when: false
+
+    - name: Print Assisted Image Service diagnostics
+      ansible.builtin.debug:
+        var: assisted_image_diag.stdout_lines
+
+    - name: Smoke test Assisted Image Service rootfs URL from bastion
+      ansible.builtin.shell: |
+        set -o pipefail
+        url='{{ assisted_image_service_rootfs_url }}'
+        code=$(curl -k -I -L --connect-timeout 10 --max-time 30 -sS -o /tmp/assisted-image-service-rootfs.headers -w '%{http_code}' "$url" || true)
+        echo "HTTP_CODE=$code"
+        cat /tmp/assisted-image-service-rootfs.headers || true
+        test "$code" != "000" -a "$code" != "503" -a "$code" != "502" -a "$code" != "404"
+      args:
+        executable: /bin/bash
+      register: assisted_rootfs_curl
+      changed_when: false
+      retries: 10
+      delay: 30
+      until: assisted_rootfs_curl.rc == 0
+
+    - name: Show Assisted Image Service rootfs smoke test result
+      ansible.builtin.debug:
+        var: assisted_rootfs_curl.stdout_lines

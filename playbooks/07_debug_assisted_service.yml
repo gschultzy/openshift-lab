@@ -1,0 +1,68 @@
+---
+- name: Debug Assisted Service on the ACM/MCE hub
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Find assisted-service namespace
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get deploy -A -o jsonpath='{range .items[?(@.metadata.name=="assisted-service")]}{.metadata.namespace}{"\n"}{end}' | head -n1
+      args:
+        executable: /bin/bash
+      register: assisted_service_namespace
+      changed_when: false
+
+    - name: Fail if assisted-service deployment is missing
+      ansible.builtin.fail:
+        msg: assisted-service deployment was not found on the hub.
+      when: assisted_service_namespace.stdout | trim | length == 0
+
+    - name: Save assisted-service namespace
+      ansible.builtin.set_fact:
+        assisted_service_ns: "{{ assisted_service_namespace.stdout | trim }}"
+
+    - name: Print assisted-service diagnostics
+      ansible.builtin.shell: |
+        set +e
+        echo "# Namespace"
+        echo "{{ assisted_service_ns }}"
+        echo
+        echo "# AgentServiceConfig"
+        oc get agentserviceconfig agent -o yaml
+        echo
+        echo "# Assisted deployments"
+        oc -n {{ assisted_service_ns }} get deploy -o wide | egrep -i 'assisted|postgres|image|NAME'
+        echo
+        echo "# Assisted pods"
+        oc -n {{ assisted_service_ns }} get pods -o wide | egrep -i 'assisted|postgres|image|NAME'
+        echo
+        echo "# Assisted PVCs"
+        oc -n {{ assisted_service_ns }} get pvc -o wide
+        echo
+        echo "# assisted-service deployment describe"
+        oc -n {{ assisted_service_ns }} describe deploy assisted-service
+        echo
+        echo "# assisted-service pods describe"
+        for p in $(oc -n {{ assisted_service_ns }} get pods -o name | grep -E 'assisted|postgres|image'); do
+          echo "## $p"
+          oc -n {{ assisted_service_ns }} describe "$p"
+        done
+        echo
+        echo "# Recent events"
+        oc -n {{ assisted_service_ns }} get events --sort-by=.lastTimestamp | tail -120
+        echo
+        echo "# assisted-service logs"
+        for p in $(oc -n {{ assisted_service_ns }} get pods -o name | grep assisted-service); do
+          echo "## $p"
+          oc -n {{ assisted_service_ns }} logs "$p" --all-containers --tail=160
+        done
+      args:
+        executable: /bin/bash
+      register: assisted_debug
+      changed_when: false
+
+    - name: Show assisted-service diagnostics
+      ansible.builtin.debug:
+        var: assisted_debug.stdout_lines

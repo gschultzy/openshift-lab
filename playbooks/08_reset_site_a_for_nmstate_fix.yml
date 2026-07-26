@@ -1,0 +1,42 @@
+---
+- name: Reset {{ bm_cluster_display_name | default(bm_cluster_name) }} discovery objects after fixing NMState/MAC/interface mapping
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Show warning
+      ansible.builtin.debug:
+        msg:
+          - "This removes current Agent/BareMetalHost/NMStateConfig objects for {{ bm_cluster_name }} so they can be recreated with corrected MAC/interface mapping."
+          - "It does not remove the hub cluster. It can reboot/wipe the selected bare-metal nodes during the next apply/provision step."
+
+    - name: Delete current Agents in {{ bm_cluster_display_name | default(bm_cluster_name) }} namespace
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete agent --all --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
+    - name: Delete current BareMetalHosts in {{ bm_cluster_display_name | default(bm_cluster_name) }} namespace
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete bmh --all --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
+    - name: Delete current NMStateConfigs in {{ bm_cluster_display_name | default(bm_cluster_name) }} namespace
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete nmstateconfig --all --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
+    - name: Delete current ClusterDeployment/AgentClusterInstall/InfraEnv for {{ bm_cluster_display_name | default(bm_cluster_name) }}
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete {{ item }} --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+      loop:
+        - "agentclusterinstall {{ bm_cluster_name }}"
+        - "infraenv {{ bm_cluster_name }}"
+        - "clusterdeployment {{ bm_cluster_name }}"
+
+    - name: Show next commands
+      ansible.builtin.debug:
+        msg:
+          - "Now rerun: ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass"
+          - "Then reboot the iDRAC nodes or run: ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass"

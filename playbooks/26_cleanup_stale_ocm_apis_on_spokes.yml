@@ -1,0 +1,177 @@
+---
+- name: Clean stale local ACM/MCE aggregated APIs from Site-A and Site-B
+  hosts: localhost
+  gather_facts: false
+  vars:
+    stale_ocm_apiservices:
+      - v1.clusterview.open-cluster-management.io
+      - v1alpha1.clusterview.open-cluster-management.io
+      - v1beta1.proxy.open-cluster-management.io
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Validate this kubeconfig is the hub, not a spoke
+      ansible.builtin.command:
+        cmd: oc --kubeconfig {{ hub_kubeconfig }} whoami --show-server
+      changed_when: false
+      register: cleanup_hub_server
+
+    - name: Stop if running against Site-A or Site-B
+      ansible.builtin.fail:
+        msg: |
+          This cleanup must be launched from the RHACM hub context.
+          Current API server: {{ cleanup_hub_server.stdout }}
+          Expected to contain: api.{{ cluster_name }}.{{ base_domain }}
+      when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in cleanup_hub_server.stdout"
+
+    - name: Ensure spoke kubeconfig output directories exist
+      ansible.builtin.file:
+        path: "{{ item | dirname }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ site_a_kubeconfig_file }}"
+        - "{{ site_b_kubeconfig_file }}"
+
+    - name: Extract Site-A admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Extract Site-B admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Clean stale OCM aggregated APIs and refresh Portworx operator on Site-A
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ site_a_kubeconfig_file | quote }}
+        echo '# Site-A API discovery before cleanup'
+        oc --kubeconfig "$K" api-resources >/tmp/site-a-api-resources.out 2>/tmp/site-a-api-resources.err || true
+        cat /tmp/site-a-api-resources.err || true
+        echo
+        echo '# Site-A OCM APIService objects before cleanup'
+        oc --kubeconfig "$K" get apiservice | egrep -i 'clusterview|proxy.open-cluster-management|open-cluster-management' || true
+        echo
+        for api in {{ stale_ocm_apiservices | join(' ') }}; do
+          if oc --kubeconfig "$K" get apiservice "$api" >/dev/null 2>&1; then
+            echo "Deleting stale APIService $api from Site-A"
+            oc --kubeconfig "$K" delete apiservice "$api"
+          else
+            echo "APIService $api not present on Site-A"
+          fi
+        done
+        echo
+        echo '# Site-A API discovery after cleanup'
+        for i in $(seq 1 30); do
+          if oc --kubeconfig "$K" api-resources >/tmp/site-a-api-resources.after 2>/tmp/site-a-api-resources.after.err; then
+            echo 'Site-A API discovery OK'
+            break
+          fi
+          echo "Site-A API discovery still failing, retry $i/30"
+          cat /tmp/site-a-api-resources.after.err || true
+          sleep 10
+        done
+        echo
+        echo '# Restart Site-A Portworx operator so it refreshes discovery cache'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} delete pod -l name=portworx-operator --ignore-not-found=true || true
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} delete pod -l app=portworx-operator --ignore-not-found=true || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      register: cleanup_site_a_stale_ocm_apis
+
+    - name: Print Site-A cleanup output
+      ansible.builtin.debug:
+        var: cleanup_site_a_stale_ocm_apis.stdout_lines
+
+    - name: Clean stale OCM aggregated APIs and refresh Portworx operator on Site-B
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ site_b_kubeconfig_file | quote }}
+        echo '# Site-B API discovery before cleanup'
+        oc --kubeconfig "$K" api-resources >/tmp/site-b-api-resources.out 2>/tmp/site-b-api-resources.err || true
+        cat /tmp/site-b-api-resources.err || true
+        echo
+        echo '# Site-B OCM APIService objects before cleanup'
+        oc --kubeconfig "$K" get apiservice | egrep -i 'clusterview|proxy.open-cluster-management|open-cluster-management' || true
+        echo
+        for api in {{ stale_ocm_apiservices | join(' ') }}; do
+          if oc --kubeconfig "$K" get apiservice "$api" >/dev/null 2>&1; then
+            echo "Deleting stale APIService $api from Site-B"
+            oc --kubeconfig "$K" delete apiservice "$api"
+          else
+            echo "APIService $api not present on Site-B"
+          fi
+        done
+        echo
+        echo '# Site-B API discovery after cleanup'
+        for i in $(seq 1 30); do
+          if oc --kubeconfig "$K" api-resources >/tmp/site-b-api-resources.after 2>/tmp/site-b-api-resources.after.err; then
+            echo 'Site-B API discovery OK'
+            break
+          fi
+          echo "Site-B API discovery still failing, retry $i/30"
+          cat /tmp/site-b-api-resources.after.err || true
+          sleep 10
+        done
+        echo
+        echo '# Restart Site-B Portworx operator so it refreshes discovery cache'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} delete pod -l name=portworx-operator --ignore-not-found=true || true
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} delete pod -l app=portworx-operator --ignore-not-found=true || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      register: cleanup_site_b_stale_ocm_apis
+
+    - name: Print Site-B cleanup output
+      ansible.builtin.debug:
+        var: cleanup_site_b_stale_ocm_apis.stdout_lines
+
+    - name: Show final Portworx and discovery status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for site in site-a site-b; do
+          if [ "$site" = "site-a" ]; then K={{ site_a_kubeconfig_file | quote }}; else K={{ site_b_kubeconfig_file | quote }}; fi
+          echo "# $site API discovery"
+          oc --kubeconfig "$K" api-resources >/dev/null && echo OK || echo FAILED
+          echo
+          echo "# $site Portworx resources"
+          oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods,storagecluster -o wide 2>/dev/null || true
+          echo
+          echo "# $site StorageClasses"
+          oc --kubeconfig "$K" get sc || true
+          echo
+          echo "# $site console plugins"
+          oc --kubeconfig "$K" get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}' 2>/dev/null || true
+          echo
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: cleanup_stale_ocm_final_status
+
+    - name: Print final status
+      ansible.builtin.debug:
+        var: cleanup_stale_ocm_final_status.stdout_lines

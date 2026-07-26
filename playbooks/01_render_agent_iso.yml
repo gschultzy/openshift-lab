@@ -1,0 +1,101 @@
+---
+- name: Render OpenShift Agent Installer inputs and create ISO
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+
+    - name: Check if existing hub cluster is already reachable
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [ ! -s "{{ hub_kubeconfig }}" ]; then
+          exit 1
+        fi
+        oc --kubeconfig "{{ hub_kubeconfig }}" get nodes >/dev/null
+        oc --kubeconfig "{{ hub_kubeconfig }}" get clusterversion version >/dev/null
+      args:
+        executable: /bin/bash
+      register: existing_hub_cluster
+      changed_when: false
+      failed_when: false
+
+    - name: Skip this hub install playbook when hub is already running
+      ansible.builtin.debug:
+        msg:
+          - "Hub SNO is already reachable and running. Skipping this install step."
+          - "Set FORCE_REBUILD_HUB=true in the environment or pass -e sno_force_rebuild=true if you really want to rebuild/re-run install."
+      when:
+        - existing_hub_cluster.rc == 0
+        - not (sno_force_rebuild | default(false) | bool)
+        - (lookup('ansible.builtin.env', 'FORCE_REBUILD_HUB') | default('false') | lower) not in ['true', '1', 'yes', 'y']
+
+    - name: End play when hub is already running
+      ansible.builtin.meta: end_play
+      when:
+        - existing_hub_cluster.rc == 0
+        - not (sno_force_rebuild | default(false) | bool)
+        - (lookup('ansible.builtin.env', 'FORCE_REBUILD_HUB') | default('false') | lower) not in ['true', '1', 'yes', 'y']
+    - name: Reset build directory
+      ansible.builtin.file:
+        path: "{{ build_root }}"
+        state: absent
+
+    - name: Create build directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0750'
+      loop:
+        - "{{ build_root }}"
+        - "{{ install_dir }}"
+        - "{{ rendered_dir }}"
+
+    - name: Render install-config.yaml
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/install-config.yaml.j2"
+        dest: "{{ rendered_dir }}/install-config.yaml"
+        mode: '0600'
+
+    - name: Render agent-config.yaml
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/agent-config.yaml.j2"
+        dest: "{{ rendered_dir }}/agent-config.yaml"
+        mode: '0600'
+
+    - name: Copy installer inputs into install directory
+      ansible.builtin.copy:
+        src: "{{ rendered_dir }}/{{ item }}"
+        dest: "{{ install_dir }}/{{ item }}"
+        remote_src: true
+        mode: '0600'
+      loop:
+        - install-config.yaml
+        - agent-config.yaml
+
+    - name: Validate rendered YAML files can be parsed
+      ansible.builtin.command: >-
+        python3 -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
+        {{ install_dir }}/install-config.yaml
+        {{ install_dir }}/agent-config.yaml
+      changed_when: false
+
+    - name: Create OpenShift Agent ISO
+      ansible.builtin.command: >-
+        openshift-install agent create image
+        --dir={{ install_dir }}
+        --log-level=info
+      environment:
+        PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
+        PYTHONPATH: "/usr/lib/python3/dist-packages:{{ ansible_env.PYTHONPATH | default('') }}"
+      args:
+        creates: "{{ agent_iso_local }}"
+
+    - name: Confirm ISO exists
+      ansible.builtin.stat:
+        path: "{{ agent_iso_local }}"
+      register: iso_stat
+
+    - name: Fail if ISO was not created
+      ansible.builtin.assert:
+        that:
+          - iso_stat.stat.exists
+        fail_msg: "Agent ISO was not created at {{ agent_iso_local }}."

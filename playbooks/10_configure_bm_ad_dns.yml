@@ -1,0 +1,13 @@
+---
+- name: Configure AD DNS records for ACM managed bare-metal cluster
+  hosts: windows_dns
+  gather_facts: false
+  tasks:
+    - name: Create or update AD DNS A records for bare-metal cluster
+      community.windows.win_dns_record:
+        name: "{{ item.name }}"
+        type: "{{ item.type }}"
+        value: "{{ item.value }}"
+        zone: "{{ ad_dns_zone }}"
+        state: present
+      loop: "{{ bm_dns_records }}"

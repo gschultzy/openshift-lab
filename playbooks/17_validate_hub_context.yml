@@ -1,0 +1,102 @@
+---
+- name: Validate that commands are running against the RHACM hub
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Set HUB_KUBECONFIG to the hub-sno kubeconfig or complete the hub install first."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Read current API server and managed clusters from supplied kubeconfig
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo "# API server"
+        oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
+        echo
+        echo "# ClusterVersion"
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get clusterversion version -o jsonpath='{.status.desired.version}{"\n"}'
+        echo
+        echo "# Managed clusters"
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster -o wide || true
+        echo
+        echo "# local-cluster URL"
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster local-cluster -o jsonpath='{range .spec.managedClusterClientConfigs[*]}{.url}{"\n"}{end}' 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: hub_context_status
+
+    - name: Print hub context status
+      ansible.builtin.debug:
+        var: hub_context_status.stdout_lines
+
+    - name: Capture API server URL
+      ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
+      changed_when: false
+      register: hub_api_server
+
+    - name: Stop if kubeconfig points at a spoke instead of hub-sno
+      ansible.builtin.fail:
+        msg: |
+          This kubeconfig is not pointing at the RHACM hub.
+
+          Current API server: {{ hub_api_server.stdout }}
+          Expected to contain: api.{{ cluster_name }}.{{ base_domain }}
+
+          Do not run RHACM/MCE integration or policies against Site-A/Site-B directly.
+          Use the hub kubeconfig instead:
+
+            export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
+            export KUBECONFIG=$HUB_KUBECONFIG
+
+          Then rerun the policy/integration script.
+      when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in hub_api_server.stdout"
+
+    - name: Check expected managed clusters are present on the hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        missing=0
+        for c in {{ bm_cluster_name }} {{ site_b_cluster_name }}; do
+          if ! oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster "$c" >/dev/null 2>&1; then
+            echo "MISSING: managedcluster/$c"
+            missing=1
+          else
+            echo "FOUND: managedcluster/$c"
+          fi
+        done
+        exit "$missing"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: expected_managedclusters
+      failed_when: false
+
+    - name: Print expected managed cluster check
+      ansible.builtin.debug:
+        var: expected_managedclusters.stdout_lines
+
+    - name: Stop if Site-A or Site-B is missing from the hub ManagedCluster inventory
+      ansible.builtin.fail:
+        msg: |
+          The supplied kubeconfig points at the hub, but one or more expected ManagedClusters are missing.
+
+          {{ expected_managedclusters.stdout }}
+
+          Re-apply the bare-metal cluster manifests from the hub context first:
+
+            export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
+            ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
+            ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_site_b_baremetal_cluster.yml --ask-vault-pass
+
+          Then rerun:
+
+            ./scripts/run-acm-mce-integration.sh
+            ./scripts/run-site-a-policies.sh
+            ./scripts/run-site-b-policies.sh
+      when: expected_managedclusters.rc != 0

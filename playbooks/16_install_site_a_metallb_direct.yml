@@ -1,0 +1,194 @@
+---
+- name: Install MetalLB directly on Site-A as a fallback to RHACM policy remediation
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Complete hub install or update hub_kubeconfig."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure Site-A kubeconfig output directory exists
+      ansible.builtin.file:
+        path: "{{ build_root }}/site-a/auth"
+        state: directory
+        mode: "0755"
+
+    - name: Extract Site-A admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ build_root }}/site-a/auth/kubeconfig
+        chmod 0600 {{ build_root }}/site-a/auth/kubeconfig
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Show current MetalLB state on Site-A
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Existing MetalLB namespace/resources'
+        oc get ns {{ site_a_metallb_namespace }} --ignore-not-found
+        oc -n {{ site_a_metallb_namespace }} get operatorgroup,subscription,csv,installplan,pods --ignore-not-found || true
+        echo
+        echo '# MetalLB package channels'
+        oc get packagemanifest metallb-operator -n openshift-marketplace \
+          -o jsonpath='{.status.defaultChannel}{"\n"}{.status.channels[*].name}{"\n"}' || true
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      changed_when: false
+      register: site_a_metallb_precheck
+
+    - name: Print current MetalLB state
+      ansible.builtin.debug:
+        var: site_a_metallb_precheck.stdout_lines
+
+    - name: Apply MetalLB namespace, OperatorGroup and Subscription on Site-A
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat <<EOF2 | oc apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: {{ site_a_metallb_namespace }}
+        ---
+        apiVersion: operators.coreos.com/v1
+        kind: OperatorGroup
+        metadata:
+          name: metallb-operator-group
+          namespace: {{ site_a_metallb_namespace }}
+        ---
+        apiVersion: operators.coreos.com/v1alpha1
+        kind: Subscription
+        metadata:
+          name: metallb-operator
+          namespace: {{ site_a_metallb_namespace }}
+        spec:
+          channel: {{ site_a_metallb_subscription_channel }}
+          installPlanApproval: {{ site_a_metallb_install_plan_approval }}
+          name: metallb-operator
+          source: {{ site_a_metallb_operator_source }}
+          sourceNamespace: {{ site_a_metallb_operator_source_namespace }}
+        EOF2
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      changed_when: true
+
+    - name: Wait until MetalLB Subscription has an installedCSV
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_a_metallb_namespace }} get subscription metallb-operator \
+          -o jsonpath='{.status.installedCSV}'
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      register: metallb_installed_csv
+      changed_when: false
+      retries: 30
+      delay: 10
+      until: metallb_installed_csv.stdout | length > 0
+
+    - name: Wait until MetalLB CSV is Succeeded
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_a_metallb_namespace }} get csv {{ metallb_installed_csv.stdout }} \
+          -o jsonpath='{.status.phase}'
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      register: metallb_csv_phase
+      changed_when: false
+      retries: 60
+      delay: 10
+      until: metallb_csv_phase.stdout == 'Succeeded'
+
+    - name: Wait for MetalLB CRDs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc get crd metallbs.metallb.io ipaddresspools.metallb.io l2advertisements.metallb.io >/dev/null
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      changed_when: false
+      retries: 30
+      delay: 10
+      register: metallb_crd_check
+      until: metallb_crd_check.rc == 0
+
+    - name: Apply MetalLB instance and HCP L2 address pool on Site-A
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat <<EOF2 | oc apply -f -
+        apiVersion: metallb.io/v1beta1
+        kind: MetalLB
+        metadata:
+          name: {{ site_a_metallb_instance_name }}
+          namespace: {{ site_a_metallb_namespace }}
+        ---
+        apiVersion: metallb.io/v1beta1
+        kind: IPAddressPool
+        metadata:
+          name: {{ site_a_metallb_pool_name }}
+          namespace: {{ site_a_metallb_namespace }}
+        spec:
+          addresses:
+            - {{ site_a_hcp_metallb_range }}
+          autoAssign: true
+          avoidBuggyIPs: false
+        ---
+        apiVersion: metallb.io/v1beta1
+        kind: L2Advertisement
+        metadata:
+          name: {{ site_a_metallb_l2_advertisement_name }}
+          namespace: {{ site_a_metallb_namespace }}
+        spec:
+          ipAddressPools:
+            - {{ site_a_metallb_pool_name }}
+        EOF2
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      changed_when: true
+
+    - name: Wait for MetalLB pods to become ready on Site-A
+      ansible.builtin.command: oc -n {{ site_a_metallb_namespace }} wait --for=condition=Ready pod --all --timeout=10m
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      changed_when: false
+
+    - name: Show final MetalLB status on Site-A
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# OLM'
+        oc -n {{ site_a_metallb_namespace }} get operatorgroup,subscription,csv,installplan
+        echo
+        echo '# Pods'
+        oc -n {{ site_a_metallb_namespace }} get pods -o wide
+        echo
+        echo '# MetalLB resources'
+        oc -n {{ site_a_metallb_namespace }} get metallb,ipaddresspool,l2advertisement
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ build_root }}/site-a/auth/kubeconfig"
+      changed_when: false
+      register: final_metallb_status
+
+    - name: Print final MetalLB status
+      ansible.builtin.debug:
+        var: final_metallb_status.stdout_lines

@@ -1,0 +1,62 @@
+---
+- name: Install Red Hat Advanced Cluster Management on the SNO hub
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Create ACM rendered directory
+      ansible.builtin.file:
+        path: "{{ acm_rendered_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Render ACM operator manifests
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/acm/{{ item }}"
+        dest: "{{ acm_rendered_dir }}/{{ item | regex_replace('\\.j2$', '') }}"
+        mode: '0600'
+      loop:
+        - 00-namespace.yaml.j2
+        - 01-operatorgroup.yaml.j2
+        - 02-subscription.yaml.j2
+        - 03-multiclusterhub.yaml.j2
+
+    - name: Apply ACM namespace, OperatorGroup, and Subscription
+      ansible.builtin.command: "oc apply -f {{ acm_rendered_dir }}/{{ item }}"
+      changed_when: true
+      loop:
+        - 00-namespace.yaml
+        - 01-operatorgroup.yaml
+        - 02-subscription.yaml
+
+    - name: Wait for MultiClusterHub CRD to appear
+      ansible.builtin.command: oc get crd multiclusterhubs.operator.open-cluster-management.io
+      register: mch_crd
+      changed_when: false
+      retries: 80
+      delay: 15
+      until: mch_crd.rc == 0
+
+    - name: Create MultiClusterHub
+      ansible.builtin.command: "oc apply -f {{ acm_rendered_dir }}/03-multiclusterhub.yaml"
+      changed_when: true
+
+    - name: Wait for MultiClusterHub to report Running
+      ansible.builtin.command: >-
+        oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }}
+        -o jsonpath='{.status.phase}'
+      register: mch_phase
+      changed_when: false
+      retries: 120
+      delay: 30
+      until: mch_phase.stdout == 'Running'
+
+    - name: Show ACM hub state
+      ansible.builtin.command: "oc -n {{ acm_namespace }} get mch {{ acm_multiclusterhub_name }}"
+      changed_when: false
+      register: mch_state
+
+    - name: Print ACM state
+      ansible.builtin.debug:
+        var: mch_state.stdout_lines

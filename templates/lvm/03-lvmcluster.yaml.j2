@@ -1,0 +1,29 @@
+apiVersion: lvm.topolvm.io/v1alpha1
+kind: LVMCluster
+metadata:
+  name: {{ lvm_cluster_name }}
+  namespace: {{ lvm_namespace }}
+spec:
+  storage:
+    deviceClasses:
+      - name: {{ lvm_device_class_name }}
+{% if lvm_node_selector_hostname | default('') | length > 0 %}
+        nodeSelector:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                    - {{ lvm_node_selector_hostname }}
+{% endif %}
+{% if lvm_device_paths | default([]) | length > 0 %}
+        deviceSelector:
+          paths:
+{% for device_path in lvm_device_paths %}
+            - {{ device_path }}
+{% endfor %}
+{% endif %}
+        thinPoolConfig:
+          name: {{ lvm_thin_pool_name }}
+          sizePercent: {{ lvm_thin_pool_size_percent }}
+          overprovisionRatio: {{ lvm_thin_pool_overprovision_ratio }}

@@ -1,0 +1,64 @@
+---
+- name: Reset Site-B discovery objects after fixing NMState/MAC/interface mapping
+  hosts: ansible_controller
+  gather_facts: false
+  vars:
+    bm_cluster_name: "{{ site_b_cluster_name }}"
+    bm_cluster_display_name: "{{ site_b_cluster_display_name | default('Site-B') }}"
+    bm_base_domain: "{{ site_b_base_domain }}"
+    bm_fqdn: "{{ site_b_fqdn }}"
+    bm_clusterset: "{{ site_b_clusterset }}"
+    bm_machine_cidr: "{{ site_b_machine_cidr }}"
+    bm_machine_cidr_prefix: "{{ site_b_machine_cidr_prefix }}"
+    bm_gateway: "{{ site_b_gateway }}"
+    bm_dns_servers: "{{ site_b_dns_servers }}"
+    bm_api_vip: "{{ site_b_api_vip }}"
+    bm_ingress_vip: "{{ site_b_ingress_vip }}"
+    bm_cluster_network_cidr: "{{ site_b_cluster_network_cidr }}"
+    bm_cluster_network_host_prefix: "{{ site_b_cluster_network_host_prefix }}"
+    bm_service_network_cidr: "{{ site_b_service_network_cidr }}"
+    bm_network_type: "{{ site_b_network_type }}"
+    bm_control_plane_count: "{{ site_b_control_plane_count }}"
+    bm_worker_count: "{{ site_b_worker_count }}"
+    bm_pull_secret_name: "{{ site_b_pull_secret_name }}"
+    bm_nodes: "{{ site_b_nodes }}"
+    bm_dns_records: "{{ site_b_dns_records }}"
+    bm_rendered_dir: "{{ site_b_rendered_dir }}"
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Show warning
+      ansible.builtin.debug:
+        msg:
+          - "This removes current Agent/BareMetalHost/NMStateConfig objects for {{ bm_cluster_name }} so they can be recreated with corrected MAC/interface mapping."
+          - "It does not remove the hub cluster. It can reboot/wipe the selected bare-metal nodes during the next apply/provision step."
+
+    - name: Delete current Agents in {{ bm_cluster_display_name | default(bm_cluster_name) }} namespace
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete agent --all --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
+    - name: Delete current BareMetalHosts in {{ bm_cluster_display_name | default(bm_cluster_name) }} namespace
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete bmh --all --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
+    - name: Delete current NMStateConfigs in {{ bm_cluster_display_name | default(bm_cluster_name) }} namespace
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete nmstateconfig --all --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
+    - name: Delete current ClusterDeployment/AgentClusterInstall/InfraEnv for {{ bm_cluster_display_name | default(bm_cluster_name) }}
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} delete {{ item }} --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+      loop:
+        - "agentclusterinstall {{ bm_cluster_name }}"
+        - "infraenv {{ bm_cluster_name }}"
+        - "clusterdeployment {{ bm_cluster_name }}"
+
+    - name: Show next commands
+      ansible.builtin.debug:
+        msg:
+          - "Now rerun: ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_site_b_baremetal_cluster.yml --ask-vault-pass"
+          - "Then reboot the iDRAC nodes or run: ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_b_nodes.yml --ask-vault-pass"

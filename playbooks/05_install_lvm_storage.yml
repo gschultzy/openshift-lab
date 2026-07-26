@@ -1,0 +1,123 @@
+---
+- name: Install LVM Storage on the SNO hub and make it the default StorageClass
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: End play when LVM storage is disabled
+      ansible.builtin.meta: end_play
+      when: not (lvm_enabled | default(true) | bool)
+
+    - name: Confirm the hub API is reachable
+      ansible.builtin.command: oc get nodes
+      register: hub_nodes
+      changed_when: false
+      retries: 40
+      delay: 15
+      until: hub_nodes.rc == 0
+
+    - name: Show hub nodes
+      ansible.builtin.debug:
+        var: hub_nodes.stdout_lines
+
+    - name: Show block devices on the SNO node before LVM configuration
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc debug node/{{ sno_node.hostname }} -- chroot /host bash -lc 'lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL'
+      args:
+        executable: /bin/bash
+      register: sno_lsblk
+      changed_when: false
+      failed_when: false
+
+    - name: Print SNO block devices
+      ansible.builtin.debug:
+        msg:
+          - "Expected LVM data disk path(s): {{ lvm_device_paths | default([]) }}"
+          - "lsblk output:"
+          - "{{ sno_lsblk.stdout_lines | default([]) }}"
+
+    - name: Create LVM rendered directory
+      ansible.builtin.file:
+        path: "{{ lvm_rendered_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Render LVM manifests
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/lvm/{{ item }}"
+        dest: "{{ lvm_rendered_dir }}/{{ item | regex_replace('\\.j2$', '') }}"
+        mode: '0600'
+      loop:
+        - 00-namespace.yaml.j2
+        - 01-operatorgroup.yaml.j2
+        - 02-subscription.yaml.j2
+        - 03-lvmcluster.yaml.j2
+
+    - name: Apply LVM namespace, OperatorGroup, and Subscription
+      ansible.builtin.command: "oc apply -f {{ lvm_rendered_dir }}/{{ item }}"
+      changed_when: true
+      loop:
+        - 00-namespace.yaml
+        - 01-operatorgroup.yaml
+        - 02-subscription.yaml
+
+    - name: Wait for LVMCluster CRD to appear
+      ansible.builtin.command: oc get crd lvmclusters.lvm.topolvm.io
+      register: lvm_crd
+      changed_when: false
+      retries: 80
+      delay: 15
+      until: lvm_crd.rc == 0
+
+    - name: Apply LVMCluster using the SNO second disk
+      ansible.builtin.command: "oc apply -f {{ lvm_rendered_dir }}/03-lvmcluster.yaml"
+      changed_when: true
+
+    - name: Wait for LVM StorageClass to be created
+      ansible.builtin.command: "oc get storageclass {{ lvm_storage_class_name }}"
+      register: lvm_sc
+      changed_when: false
+      retries: 80
+      delay: 15
+      until: lvm_sc.rc == 0
+
+    - name: Clear default annotation from existing StorageClasses
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get storageclass -o name | xargs -r -I{} oc annotate {} storageclass.kubernetes.io/is-default-class- --overwrite
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: lvm_make_default_storageclass | default(true) | bool
+
+    - name: Mark LVM StorageClass as default
+      ansible.builtin.command: >-
+        oc annotate storageclass {{ lvm_storage_class_name }}
+        storageclass.kubernetes.io/is-default-class=true --overwrite
+      changed_when: true
+      when: lvm_make_default_storageclass | default(true) | bool
+
+    - name: Show StorageClasses
+      ansible.builtin.command: oc get storageclass
+      changed_when: false
+      register: storageclasses
+
+    - name: Print StorageClasses
+      ansible.builtin.debug:
+        var: storageclasses.stdout_lines
+
+    - name: Show LVMCluster status
+      ansible.builtin.command: "oc -n {{ lvm_namespace }} get lvmcluster {{ lvm_cluster_name }} -o yaml"
+      changed_when: false
+      register: lvmcluster_status
+      failed_when: false
+
+    - name: Print LVMCluster status summary
+      ansible.builtin.debug:
+        msg:
+          - "LVMCluster: {{ lvm_cluster_name }}"
+          - "Default StorageClass target: {{ lvm_storage_class_name }}"
+          - "Device path(s): {{ lvm_device_paths | default([]) }}"
+          - "If the LVMCluster is not Ready, verify the second disk path above."

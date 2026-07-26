@@ -1,0 +1,22 @@
+apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  name: {{ bm_cluster_name }}
+  namespace: {{ bm_cluster_name }}
+{% if bm_enable_ironic_agent | bool %}
+  annotations:
+    infraenv.agent-install.openshift.io/enable-ironic-agent: "true"
+{% endif %}
+spec:
+  clusterRef:
+    name: {{ bm_cluster_name }}
+    namespace: {{ bm_cluster_name }}
+  cpuArchitecture: x86_64
+  pullSecretRef:
+    name: {{ bm_pull_secret_name }}
+  sshAuthorizedKey: '{{ ssh_pub_key }}'
+  nmStateConfigLabelSelector:
+    matchLabels:
+      infraenvs.agent-install.openshift.io: {{ bm_cluster_name }}
+  agentLabels:
+    agentclusterinstalls.extensions.hive.openshift.io/location: {{ bm_cluster_name }}

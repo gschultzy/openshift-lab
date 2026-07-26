@@ -1,0 +1,12 @@
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: {{ bm_clusterset }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ bm_clusterset }}
+  namespace: {{ bm_cluster_name }}
+spec:
+  clusterSet: {{ bm_clusterset }}

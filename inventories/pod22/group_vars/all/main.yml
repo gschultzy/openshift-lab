@@ -1,0 +1,891 @@
+---
+# ---------------------------------------------------------------------------
+# OpenShift release / cluster identity
+# ---------------------------------------------------------------------------
+ocp_version: "4.21"
+ocp_release_version: "4.21.20"
+cluster_name: hub-sno
+base_domain: poc.local
+cluster_fqdn: "{{ cluster_name }}.{{ base_domain }}"
+
+# ---------------------------------------------------------------------------
+# Static IP plan
+# ---------------------------------------------------------------------------
+# Default is platform none because Ansible creates the SNO VM on vSphere.
+# This avoids requiring a vSphere compute cluster name in install-config.yaml,
+# which is important in this lab because the provided inventory is a standalone
+# ESXi host managed by vCenter.
+#
+# For a production vSphere-integrated OpenShift install, change to "vsphere"
+# and fill in vsphere_cluster below.
+sno_install_platform: none
+
+machine_cidr: 10.23.22.0/24
+machine_cidr_prefix: 24
+gateway: 10.23.22.1
+dns_servers:
+  - 10.23.22.100
+
+sno_node:
+  hostname: hub-sno-0
+  fqdn: hub-sno-0.hub-sno.poc.local
+  ip: 10.23.22.90
+  # These are VMware VM NIC MACs, not iDRAC MACs.
+  # Keep them unique and make sure vCenter accepts the chosen static MAC range.
+  mac_eth0: "00:50:56:23:22:90"
+  primary_interface: ens192
+
+  # Secondary NIC is disabled by default for the SNO hub.
+  # Do not configure VLAN522 for the SNO VM. The hub only needs VLAN3522.
+  secondary_nic_enabled: false
+  mac_eth1: ""
+  secondary_interface: ""
+
+# VIPs are only used when sno_install_platform is "vsphere".
+# With platform none/SNO, DNS should point api/api-int/apps to the SNO node IP.
+api_vip: 10.23.22.91
+ingress_vip: 10.23.22.92
+sno_api_ip: "{{ sno_node.ip if sno_install_platform == 'none' else api_vip }}"
+sno_ingress_ip: "{{ sno_node.ip if sno_install_platform == 'none' else ingress_vip }}"
+
+# OpenShift internal networks
+cluster_network_cidr: 10.128.0.0/14
+cluster_network_host_prefix: 23
+service_network_cidr: 172.30.0.0/16
+network_type: OVNKubernetes
+
+# ---------------------------------------------------------------------------
+# vSphere / VMware
+# ---------------------------------------------------------------------------
+vcenter_hostname: 10.23.22.10
+vcenter_username: administrator@vsphere.local
+vcenter_password: "{{ vault_vcenter_password }}"
+validate_certs: false
+
+# Change these to match vCenter inventory names.
+# This starter creates the VM on the standalone ESXi host through vCenter.
+vsphere_datacenter: CompanyA
+vsphere_esxi_hostname: 10.23.22.11
+vsphere_resource_pool: Resources
+vsphere_folder: "/{{ vsphere_datacenter }}/vm"
+vsphere_datastore: datastore1
+
+# Only required when sno_install_platform: vsphere.
+# Leave unset/empty when using the default platform none mode.
+vsphere_cluster: ""
+
+# Port group for the SNO VM machine network. This must map to VLAN 3522 on the ESXi/vSwitch side.
+# If discovery only shows MGMT and MGMT is already on VLAN 3522, set this to MGMT instead.
+vm_network_eth0: MGMT
+
+# Optional secondary NIC. Disabled by default because the SNO hub only needs VLAN 3522.
+# Leave blank unless sno_node.secondary_nic_enabled is set to true.
+vm_network_eth1: ""
+
+# Optional helper playbook 00_create_sno_primary_portgroup.yml / 02_create_vsphere_vm.yml uses these values.
+# Use VLAN ID 0 when the ESXi physical uplink switchport is ACCESS VLAN 3522.
+# Use VLAN ID 3522 only when the ESXi uplink is a TRUNK carrying VLAN 3522.
+sno_primary_portgroup_vlan_id: 0
+sno_primary_portgroup_auto_create: false
+
+# Auto-create mode:
+#   auto        - use a standard vSwitch when esxi_vswitch_name exists; otherwise use the distributed switch
+#   standard    - force ESXi standard vSwitch creation
+#   distributed - force vSphere Distributed Switch port group creation
+sno_primary_portgroup_create_mode: auto
+
+# Standard vSwitch fallback. If your ESXi host has no vSwitch0, the playbook will try the DVS below.
+esxi_vswitch_name: vSwitch0
+
+# vSphere Distributed Switch fallback. Your discovery output shows DSwitch-DVUplinks-18, so DSwitch is the likely DVS name.
+sno_primary_dvs_name: DSwitch
+sno_primary_dvs_num_ports: 128
+
+# SNO VM sizing. Increase disk for ACM / hub workloads if needed.
+sno_vm_name: hub-sno
+sno_vm_cpu: 16
+sno_vm_memory_mb: 65536
+sno_vm_disk_gb: 250
+
+# Optional second data disk for later hub workloads, LVM/ODF experiments, image registry, etc.
+# This playbook only attaches the disk; it does not format or mount it inside OpenShift/RHCOS.
+sno_vm_extra_disk_enabled: true
+sno_vm_extra_disk_gb: 800
+sno_vm_extra_disk_type: thin
+
+sno_vm_guest_id: rhel9_64Guest
+sno_vm_firmware: efi
+# Required for OpenShift/RHCOS on vSphere so disks are mounted and identified correctly.
+sno_vm_disk_enable_uuid: true
+# Power off before configure so CD-ROM, boot order, disks, and disk.EnableUUID apply cleanly.
+sno_vm_poweroff_before_configure: true
+# Set true only when you want the playbook to delete/recreate the SNO VM for a clean install.
+sno_vm_recreate: false
+
+# Datastore path where the generated agent ISO will be uploaded.
+# Default upload method is esxi_ssh because some lab vCenter datastore HTTP APIs
+# return 404 when community.vmware.vsphere_file tries to create new folders.
+# The VM still attaches the ISO through vCenter using iso_vsphere_path.
+#
+# Supported values:
+#   esxi_ssh    - create folders/upload ISO through SSH/SCP to the ESXi datastore path
+#   vcenter_api - use community.vmware.vsphere_file/vsphere_copy through vCenter
+iso_upload_method: esxi_ssh
+
+# ESXi SSH/SCP upload settings. Make sure SSH is enabled on the ESXi host.
+esxi_hostname: "{{ vsphere_esxi_hostname }}"
+esxi_username: root
+esxi_password: "{{ vault_esxi_password }}"
+esxi_datastore_mount: "/vmfs/volumes/{{ vsphere_datastore }}"
+
+# Set true only if you need to hide all ESXi SSH/SCP task output. Default false so upload failures show useful stderr.
+esxi_upload_no_log: false
+
+
+# Use a unique ISO filename for each playbook run so ESXi does not fail with
+# "Device or resource busy" when the previous ISO is still mounted by a VM.
+iso_unique_per_upload: true
+
+# During Agent ISO installs, the VM must not reboot back into the ISO after RHCOS is written to disk.
+# 02_create_vsphere_vm.yml sets boot order to disk first with CD-ROM fallback.
+# 03_wait_install.yml also tries a best-effort CD-ROM disconnect after disk write reaches 100%.
+# Some vSphere/IDE CD-ROM combos cannot hot-disconnect while powered on; by default that warning does not fail the install.
+sno_auto_disconnect_iso_after_disk_write: true
+sno_set_boot_disk_first_after_iso_disconnect: true
+sno_iso_disconnect_fail_on_error: false
+sno_iso_disconnect_log_retries: 240
+sno_iso_disconnect_log_delay_seconds: 15
+sno_bootstrap_wait_async_timeout_seconds: 7200
+sno_bootstrap_wait_poll_retries: 240
+sno_bootstrap_wait_poll_delay_seconds: 30
+
+# Leave iso_datastore_folder empty ("") to upload to the datastore root.
+iso_datastore_folder: iso/ocp
+iso_datastore_name: "{{ cluster_name }}-agent.x86_64.iso"
+iso_datastore_path: "{{ ((iso_datastore_folder | default('') | trim('/')) ~ '/') if ((iso_datastore_folder | default('') | trim('/')) | length > 0) else '' }}{{ iso_datastore_name }}"
+iso_vsphere_path: "[{{ vsphere_datastore }}] {{ iso_datastore_path }}"
+esxi_iso_dir: "{{ esxi_datastore_mount }}{{ '/' ~ (iso_datastore_folder | trim('/')) if (iso_datastore_folder | default('') | trim('/') | length > 0) else '' }}"
+esxi_iso_path: "{{ esxi_datastore_mount }}/{{ iso_datastore_path }}"
+
+# ---------------------------------------------------------------------------
+# Build paths on the Ansible controller
+# ---------------------------------------------------------------------------
+repo_root: "{{ playbook_dir }}/.."
+build_root: "{{ repo_root }}/build/{{ cluster_name }}"
+install_dir: "{{ build_root }}/install"
+rendered_dir: "{{ build_root }}/rendered"
+agent_iso_local: "{{ install_dir }}/agent.x86_64.iso"
+
+# These come from vault.yml
+pull_secret: "{{ vault_pull_secret }}"
+ssh_pub_key: "{{ vault_ssh_public_key }}"
+
+# ---------------------------------------------------------------------------
+# AD DNS optional automation
+# ---------------------------------------------------------------------------
+ad_dns_zone: poc.local
+ad_dns_records:
+  - name: "api.{{ cluster_name }}"
+    type: A
+    value: "{{ sno_api_ip }}"
+  - name: "api-int.{{ cluster_name }}"
+    type: A
+    value: "{{ sno_api_ip }}"
+  - name: "*.apps.{{ cluster_name }}"
+    type: A
+    value: "{{ sno_ingress_ip }}"
+  - name: "{{ sno_node.hostname }}.{{ cluster_name }}"
+    type: A
+    value: "{{ sno_node.ip }}"
+
+# ---------------------------------------------------------------------------
+# LVM Storage on the SNO hub
+# ---------------------------------------------------------------------------
+lvm_enabled: true
+lvm_namespace: openshift-storage
+lvm_operatorgroup_name: openshift-storage-operatorgroup
+lvm_subscription_name: lvms-operator
+lvm_operator_package: lvms-operator
+lvm_operator_channel: "stable-{{ ocp_version }}"
+lvm_operator_source: redhat-operators
+lvm_operator_source_namespace: openshift-marketplace
+lvm_install_plan_approval: Automatic
+
+# The second vSphere disk attached to the SNO VM is expected to appear as /dev/sdb.
+# If the disk appears differently, update this list after running:
+#   oc debug node/hub-sno-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+lvm_cluster_name: lvmcluster
+lvm_device_class_name: vg1
+lvm_storage_class_name: "lvms-{{ lvm_device_class_name }}"
+lvm_device_paths:
+  - /dev/sdb
+lvm_node_selector_hostname: "{{ sno_node.hostname }}"
+lvm_thin_pool_name: thin-pool-1
+lvm_thin_pool_size_percent: 90
+lvm_thin_pool_overprovision_ratio: 10
+lvm_make_default_storageclass: true
+lvm_rendered_dir: "{{ build_root }}/lvm"
+
+# ---------------------------------------------------------------------------
+# ACM hub bootstrap
+# ---------------------------------------------------------------------------
+hub_kubeconfig: "{{ install_dir }}/auth/kubeconfig"
+
+acm_namespace: open-cluster-management
+acm_operatorgroup_name: open-cluster-management-group
+# Check the available channel on your catalog if this changes:
+# oc get packagemanifest advanced-cluster-management -n openshift-marketplace -o jsonpath='{.status.channels[*].name}'
+acm_subscription_channel: release-2.16
+acm_install_plan_approval: Automatic
+acm_operator_source: redhat-operators
+acm_operator_source_namespace: openshift-marketplace
+acm_multiclusterhub_name: multiclusterhub
+# Basic is much lighter and is preferred for a lab/SNO hub.
+acm_availability_config: Basic
+acm_disable_hub_self_management: false
+
+# Assisted service persistent storage. Leave storageClass blank to use the cluster default StorageClass.
+assisted_service_configure: true
+assisted_service_storage_class: "{{ lvm_storage_class_name if (lvm_make_default_storageclass | default(true) | bool) else '' }}"
+assisted_service_database_storage: 10Gi
+assisted_service_filesystem_storage: 100Gi
+assisted_service_image_storage: 50Gi
+
+
+# Assisted Image Service route used by bare-metal hosts to download the live rootfs.
+# Bare-metal nodes must resolve assisted-image-service-<namespace>.apps.<hub cluster fqdn> to the SNO ingress IP.
+assisted_image_service_namespace: multicluster-engine
+assisted_image_service_route_name: assisted-image-service
+
+# ---------------------------------------------------------------------------
+# Managed bare-metal cluster deployed by ACM / Assisted Installer
+# ---------------------------------------------------------------------------
+bm_cluster_name: site-a
+bm_cluster_display_name: Site-A
+bm_base_domain: poc.local
+bm_fqdn: "{{ bm_cluster_name }}.{{ bm_base_domain }}"
+bm_clusterset: site-a-baremetal
+
+# Release image used by the managed bare-metal cluster.
+# Keep this aligned with a valid OpenShift release payload available to your environment.
+bm_cluster_image_set_name: "openshift-v{{ ocp_version }}"
+bm_cluster_release_image: "quay.io/openshift-release-dev/ocp-release:{{ ocp_release_version }}-x86_64"
+
+bm_machine_cidr: 10.23.22.0/24
+bm_machine_cidr_prefix: 24
+bm_gateway: 10.23.22.1
+bm_dns_servers:
+  - 10.23.22.100
+bm_api_vip: 10.23.22.120
+bm_ingress_vip: 10.23.22.121
+
+bm_cluster_network_cidr: 10.132.0.0/14
+bm_cluster_network_host_prefix: 23
+bm_service_network_cidr: 172.31.0.0/16
+bm_network_type: OVNKubernetes
+
+# 3 masters + 3 workers by default. For compact 3-node, disable b08-36, b09-33, b09-34 and set worker count to 0.
+bm_control_plane_count: 3
+bm_worker_count: 0
+bm_pull_secret_name: pull-secret
+bm_enable_ironic_agent: true
+# Lab default: disable second 25G NIC during Assisted Installer discovery.
+# Prevents DHCP on the non-install NIC from adding an unexpected IP/default route.
+bm_disable_secondary_interfaces: true
+idrac_enforce_same_firmware: true
+
+# These BMC addresses assume no provisioning network and use Redfish virtual media.
+# Confirm the System path on each iDRAC. Dell commonly uses /redfish/v1/Systems/System.Embedded.1
+idrac_redfish_system_path: /redfish/v1/Systems/System.Embedded.1
+
+# IMPORTANT: The 10.23.22.80-85 addresses below are treated as iDRAC/BMC addresses.
+# The OpenShift host OS static IPs are set separately as 10.23.22.110-115.
+# Change the boot_mac values if the listed BC:97:E1 values are not the NICs cabled to VLAN 3522.
+bm_nodes:
+  - name: b08-33
+    hostname: b08-33
+    role: master
+    enabled: true
+    bmc_ip: 10.23.22.80
+    bmc_address: "redfish-virtualmedia://10.23.22.80{{ idrac_redfish_system_path }}"
+    # iDRAC shows this as Integrated NIC 1 Port 1 Partition 1.
+    # RHCOS console shows the Linux interface name as eno33np0.
+    boot_mac: "BC:97:E1:C3:F6:E0"
+    ip: 10.23.22.110
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+  - name: b08-34
+    hostname: b08-34
+    role: master
+    enabled: true
+    bmc_ip: 10.23.22.81
+    bmc_address: "redfish-virtualmedia://10.23.22.81{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:7E:99:60"
+    ip: 10.23.22.111
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+  - name: b08-35
+    hostname: b08-35
+    role: master
+    enabled: true
+    bmc_ip: 10.23.22.82
+    bmc_address: "redfish-virtualmedia://10.23.22.82{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:7E:99:F0"
+    ip: 10.23.22.112
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+  - name: b08-36
+    hostname: b08-36
+    role: worker
+    enabled: false
+    bmc_ip: 10.23.22.83
+    bmc_address: "redfish-virtualmedia://10.23.22.83{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:7E:98:D0"
+    ip: 10.23.22.113
+    primary_interface: eno1
+    secondary_interface: eno2
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+  - name: b09-33
+    hostname: b09-33
+    role: worker
+    enabled: false
+    bmc_ip: 10.23.22.84
+    bmc_address: "redfish-virtualmedia://10.23.22.84{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:7E:90:40"
+    ip: 10.23.22.114
+    primary_interface: eno1
+    secondary_interface: eno2
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+  - name: b09-34
+    hostname: b09-34
+    role: worker
+    enabled: false
+    bmc_ip: 10.23.22.85
+    bmc_address: "redfish-virtualmedia://10.23.22.85{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:6E:3A:90"
+    ip: 10.23.22.115
+    primary_interface: eno1
+    secondary_interface: eno2
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+
+bm_dns_records:
+  - name: "api.{{ bm_cluster_name }}"
+    type: A
+    value: "{{ bm_api_vip }}"
+  - name: "api-int.{{ bm_cluster_name }}"
+    type: A
+    value: "{{ bm_api_vip }}"
+  - name: "*.apps.{{ bm_cluster_name }}"
+    type: A
+    value: "{{ bm_ingress_vip }}"
+
+
+# ---------------------------------------------------------------------------
+# Site-B managed bare-metal cluster
+# ---------------------------------------------------------------------------
+# Site-B uses the remaining three Dell nodes as a compact 3-node OpenShift cluster.
+# IMPORTANT: b09-33 and b09-34 boot_mac values are placeholders by default.
+# playbooks/05_discover_site_b_idrac_nics.yml now auto-fills them from iDRAC by
+# choosing the link-up 25GbE Integrated NIC 1 Port 1 MAC.
+site_b_cluster_name: site-b
+site_b_cluster_display_name: Site-B
+site_b_base_domain: poc.local
+site_b_fqdn: "{{ site_b_cluster_name }}.{{ site_b_base_domain }}"
+site_b_clusterset: site-b-baremetal
+
+site_b_machine_cidr: 10.23.22.0/24
+site_b_machine_cidr_prefix: 24
+site_b_gateway: 10.23.22.1
+site_b_dns_servers:
+  - 10.23.22.100
+site_b_api_vip: 10.23.22.130
+site_b_ingress_vip: 10.23.22.131
+
+site_b_cluster_network_cidr: 10.136.0.0/14
+site_b_cluster_network_host_prefix: 23
+site_b_service_network_cidr: 172.32.0.0/16
+site_b_network_type: OVNKubernetes
+
+site_b_control_plane_count: 3
+site_b_worker_count: 0
+site_b_pull_secret_name: pull-secret
+
+site_b_nodes:
+  - name: b08-36
+    hostname: b08-36
+    role: master
+    enabled: true
+    bmc_ip: 10.23.22.83
+    bmc_address: "redfish-virtualmedia://10.23.22.83{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:7E:98:D0"
+    ip: 10.23.22.113
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.10.50"
+  - name: b09-33
+    hostname: b09-33
+    role: master
+    enabled: true
+    bmc_ip: 10.23.22.84
+    bmc_address: "redfish-virtualmedia://10.23.22.84{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:7E:90:40"
+    ip: 10.23.22.114
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b09-34
+    hostname: b09-34
+    role: master
+    enabled: true
+    bmc_ip: 10.23.22.85
+    bmc_address: "redfish-virtualmedia://10.23.22.85{{ idrac_redfish_system_path }}"
+    boot_mac: "BC:97:E1:6E:3A:90"
+    ip: 10.23.22.115
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.30.51"
+
+site_b_dns_records:
+  - name: "api.{{ site_b_cluster_name }}"
+    type: A
+    value: "{{ site_b_api_vip }}"
+  - name: "api-int.{{ site_b_cluster_name }}"
+    type: A
+    value: "{{ site_b_api_vip }}"
+  - name: "*.apps.{{ site_b_cluster_name }}"
+    type: A
+    value: "{{ site_b_ingress_vip }}"
+
+site_b_rendered_dir: "{{ build_root }}/baremetal/{{ site_b_cluster_name }}"
+site_b_kubeconfig_file: "{{ build_root }}/site-b/auth/kubeconfig"
+site_b_disable_secondary_interfaces: true
+# Site-B lab default: allow mixed iDRAC patch levels unless explicitly changed.
+# Set true if you want preflight to enforce each node's idrac_firmware_expected.
+site_b_idrac_enforce_same_firmware: false
+
+
+# Rendered manifest locations
+acm_rendered_dir: "{{ build_root }}/acm"
+bm_rendered_dir: "{{ build_root }}/baremetal/{{ bm_cluster_name }}"
+
+# ---------------------------------------------------------------------------
+# Site-A HCP hosting setup managed from RHACM policies
+# ---------------------------------------------------------------------------
+site_a_policy_namespace: site-a-policies
+site_a_policy_cluster_label_key: hcp-hosting
+site_a_policy_cluster_label_value: "true"
+site_a_policy_placement_name: site-a-placement
+site_a_policy_remediation_action: enforce
+# Lab-only: allow placement to select Site-A even while RHACM marks it Unknown/Unreachable.
+# Keep false for production; fix cluster availability instead.
+site_a_policy_tolerate_unreachable: true
+site_a_policy_rendered_dir: "{{ build_root }}/site-a-hcp-policies"
+
+# OpenShift Virtualization on Site-A
+site_a_virt_namespace: openshift-cnv
+site_a_virt_subscription_channel: stable
+site_a_virt_operator_source: redhat-operators
+site_a_virt_operator_source_namespace: openshift-marketplace
+site_a_virt_install_plan_approval: Automatic
+site_a_virt_vm_state_storage_class: "{{ portworx_vmstate_storage_class }}"
+
+# Deprecated direct-MCE-on-Site-A variables. Hub-managed mode uses the hypershift-addon instead.
+site_a_mce_namespace: multicluster-engine
+site_a_mce_subscription_channel: stable-2.11
+site_a_mce_operator_source: redhat-operators
+site_a_mce_operator_source_namespace: openshift-marketplace
+site_a_mce_install_plan_approval: Automatic
+site_a_mce_name: multiclusterengine
+
+# MetalLB on Site-A for HCP LoadBalancer services
+site_a_metallb_namespace: metallb-system
+site_a_metallb_subscription_channel: stable
+site_a_metallb_operator_source: redhat-operators
+site_a_metallb_operator_source_namespace: openshift-marketplace
+site_a_metallb_install_plan_approval: Automatic
+site_a_metallb_instance_name: metallb
+site_a_metallb_pool_name: hcp-lb-pool
+site_a_metallb_l2_advertisement_name: hcp-l2-advertisement
+# Five IPs reserved for HCP-related LoadBalancer services. Adjust if these are already in use.
+site_a_hcp_metallb_range: 10.23.22.122-10.23.22.126
+
+# Optional: install LVM on Site-A as part of the same policy set.
+# Leave disabled until you confirm the unused disk device paths on the Site-A bare-metal nodes.
+site_a_lvm_policy_enabled: false
+site_a_lvm_namespace: openshift-storage
+site_a_lvm_subscription_channel: "stable-{{ ocp_version }}"
+site_a_lvm_operator_source: redhat-operators
+site_a_lvm_operator_source_namespace: openshift-marketplace
+site_a_lvm_install_plan_approval: Automatic
+site_a_lvm_cluster_name: lvmcluster
+site_a_lvm_device_class_name: vg1
+site_a_lvm_storage_class_name: "lvms-{{ site_a_lvm_device_class_name }}"
+site_a_lvm_device_paths: []
+# Safety guard for lab LVM installs. Keep false unless you are happy for LVMS to claim all unused disks.
+site_a_lvm_allow_all_unused_devices: false
+site_a_lvm_make_default_storageclass: true
+
+
+# Portworx/Pure backed HCP storage defaults.
+# Keep these explicit so hosted-cluster creation does not fall back to the older
+# single-class px-fada-rwx-block-virt model.
+#
+# StorageClass roles:
+#   vmstate                - OpenShift Virtualization vmStateStorageClass for TPM/vTPM state.
+#   hcp-pxe-boot          - ALL hosted-cluster worker VM boot/root volumes.
+#   hcp-pxe-data          - General-purpose additional disks exposed to tenant VMs.
+#   hcp-pxe-etcd-pxfast   - Hosted control-plane etcd PVCs.
+#   hcp-fada-data         - Created for future use inside tenant clusters when PX is installed there.
+portworx_vmstate_storage_class: vmstate
+portworx_hcp_root_volume_storage_class: hcp-pxe-boot
+portworx_hcp_etcd_storage_class: hcp-pxe-etcd-pxfast
+portworx_hcp_passthrough_infra_storage_class: hcp-pxe-data
+portworx_hcp_guest_storage_class: hcp-pxe-data
+portworx_hcp_tenant_px_storage_class: hcp-fada-data
+portworx_hcp_snapshot_class: px-csi-snapclass
+# Backward-compatible alias used by older playbooks. New code should use the
+# role-specific variables above.
+portworx_hcp_infra_storage_class: "{{ portworx_hcp_root_volume_storage_class }}"
+portworx_hcp_root_volume_size: 64
+portworx_hcp_root_volume_access_modes: ReadWriteMany
+portworx_hcp_root_volume_volume_mode: Block
+portworx_hcp_enable_root_volume_cache: false
+portworx_pure_apply_hcp_storageclasses: true
+portworx_hcp_boot_storage_class_is_default: true
+
+# HCP tenant list. The shell scripts use scripts/lib/hcp-tenants.sh as the source of truth,
+# but these inventory values document the intended tenant layout. RHACM ManagedCluster
+# names intentionally match HostedCluster names.
+hcp_tenants:
+  - site: site-a
+    name: site-a-hcp-t1-px
+    managed_cluster_name: site-a-hcp-t1-px
+    cluster_cidr: 10.144.0.0/14
+    service_cidr: 172.32.0.0/16
+    enable_extra_disks: true
+    tenant_px_storage_class: hcp-fada-data
+    guest_storage_class: hcp-pxe-data
+  - site: site-a
+    name: site-a-hcp-t2-kv
+    managed_cluster_name: site-a-hcp-t2-kv
+    cluster_cidr: 10.148.0.0/14
+    service_cidr: 172.33.0.0/16
+    enable_extra_disks: false
+    tenant_px_storage_class: hcp-fada-data
+    guest_storage_class: hcp-pxe-data
+  - site: site-b
+    name: site-b-hcp-t1-px
+    managed_cluster_name: site-b-hcp-t1-px
+    cluster_cidr: 10.152.0.0/14
+    service_cidr: 172.34.0.0/16
+    enable_extra_disks: true
+    tenant_px_storage_class: hcp-fada-data
+    guest_storage_class: hcp-pxe-data
+  - site: site-b
+    name: site-b-hcp-t2-kv
+    managed_cluster_name: site-b-hcp-t2-kv
+    cluster_cidr: 10.156.0.0/14
+    service_cidr: 172.35.0.0/16
+    enable_extra_disks: false
+    tenant_px_storage_class: hcp-fada-data
+    guest_storage_class: hcp-pxe-data
+
+# Default Site-A tenant values used by the HCP tenant loop.
+# The create script overrides these per tenant from scripts/lib/hcp-tenants.sh.
+site_a_hcp_cluster_name: site-a-hcp-t1-px
+site_a_hcp_namespace: clusters
+site_a_hcp_nodepool_replicas: 3
+site_a_hcp_worker_cores: 8
+site_a_hcp_worker_memory: 8Gi
+site_a_hcp_release_image: "{{ bm_cluster_release_image }}"
+site_a_hcp_channel: fast-4.21
+site_a_hcp_pull_secret_name: openshift-pull-secret
+site_a_hcp_ssh_key_name: tenant-ssh-key
+site_a_hcp_machine_config_name: px-non-rotational
+site_a_hcp_etcd_volume_size: 8Gi
+site_a_hcp_snapshot_class: "{{ portworx_hcp_snapshot_class }}"
+site_a_hcp_tenant_px_storage_class: "{{ portworx_hcp_tenant_px_storage_class }}"
+site_a_hcp_extra_disk_storage_class: "{{ site_a_hcp_tenant_px_storage_class }}"
+site_a_hcp_enable_extra_disks: true
+site_a_hcp_extra_disks:
+  - name: extra-disk-1
+    size: 3Gi
+  - name: extra-disk-2
+    size: 64Gi
+  - name: extra-disk-3
+    size: 100Gi
+# Guest network CIDRs. Keep these non-overlapping with the hosting clusters and each other.
+# Site-A uses the proven non-overlap values that were previously only set by
+# scripts/recreate-site-a-hcp-with-nonoverlap-network.sh.
+site_a_hcp_cluster_cidr: 10.144.0.0/14
+site_a_hcp_service_cidr: 172.32.0.0/16
+# HCP backing storage on the Site-A hosting cluster.
+# For this lab we pin HCP etcd, worker VM root volumes, and hosted-cluster storage passthrough
+# to the role-specific Portworx/Pure StorageClasses below.
+site_a_hcp_etcd_storage_class: "{{ portworx_hcp_etcd_storage_class }}"
+site_a_hcp_root_volume_storage_class: "{{ portworx_hcp_root_volume_storage_class }}"
+site_a_hcp_root_volume_size: "{{ portworx_hcp_root_volume_size }}"
+site_a_hcp_root_volume_access_modes: "{{ portworx_hcp_root_volume_access_modes }}"
+site_a_hcp_root_volume_volume_mode: "{{ portworx_hcp_root_volume_volume_mode }}"
+site_a_hcp_enable_root_volume_cache: "{{ portworx_hcp_enable_root_volume_cache }}"
+site_a_hcp_enable_storage_passthrough: true
+site_a_hcp_passthrough_infra_storage_class: "{{ portworx_hcp_passthrough_infra_storage_class }}"
+site_a_hcp_passthrough_guest_storage_class: "{{ portworx_hcp_guest_storage_class }}"
+# Safe default: do not delete/recreate an existing hosted cluster unless explicitly requested.
+site_a_hcp_recreate: false
+site_a_kubeconfig_file: "{{ build_root }}/site-a/auth/kubeconfig"
+site_a_hcp_pull_secret_file: "{{ build_root }}/site-a-hcp/pull-secret.json"
+site_a_hcp_ssh_key_file: "{{ build_root }}/site-a-hcp/ssh.pub"
+site_a_hcp_cli_path: "{{ build_root }}/bin/hcp"
+
+# ---------------------------------------------------------------------------
+# Site-B HCP hosting setup managed from RHACM policies
+# ---------------------------------------------------------------------------
+site_b_policy_namespace: site-b-policies
+site_b_policy_cluster_label_key: hcp-hosting
+site_b_policy_cluster_label_value: "true"
+site_b_policy_placement_name: site-b-placement
+site_b_policy_remediation_action: enforce
+# Lab-only: allow placement to select Site-B even while RHACM marks it Unknown/Unreachable.
+# Keep false for production; fix cluster availability instead.
+site_b_policy_tolerate_unreachable: true
+site_b_policy_rendered_dir: "{{ build_root }}/site-b-hcp-policies"
+
+# OpenShift Virtualization on Site-B
+site_b_virt_namespace: "{{ site_a_virt_namespace }}"
+site_b_virt_subscription_channel: "{{ site_a_virt_subscription_channel }}"
+site_b_virt_operator_source: "{{ site_a_virt_operator_source }}"
+site_b_virt_operator_source_namespace: "{{ site_a_virt_operator_source_namespace }}"
+site_b_virt_install_plan_approval: "{{ site_a_virt_install_plan_approval }}"
+site_b_virt_vm_state_storage_class: "{{ portworx_vmstate_storage_class }}"
+
+# Deprecated direct-MCE-on-Site-B variables. Hub-managed mode uses the hypershift-addon instead.
+site_b_mce_namespace: "{{ site_a_mce_namespace }}"
+site_b_mce_subscription_channel: "{{ site_a_mce_subscription_channel }}"
+site_b_mce_operator_source: "{{ site_a_mce_operator_source }}"
+site_b_mce_operator_source_namespace: "{{ site_a_mce_operator_source_namespace }}"
+site_b_mce_install_plan_approval: "{{ site_a_mce_install_plan_approval }}"
+site_b_mce_name: "{{ site_a_mce_name }}"
+
+# MetalLB on Site-B for HCP LoadBalancer services
+site_b_metallb_namespace: "{{ site_a_metallb_namespace }}"
+site_b_metallb_subscription_channel: "{{ site_a_metallb_subscription_channel }}"
+site_b_metallb_operator_source: "{{ site_a_metallb_operator_source }}"
+site_b_metallb_operator_source_namespace: "{{ site_a_metallb_operator_source_namespace }}"
+site_b_metallb_install_plan_approval: "{{ site_a_metallb_install_plan_approval }}"
+site_b_metallb_instance_name: "{{ site_a_metallb_instance_name }}"
+site_b_metallb_pool_name: hcp-lb-pool
+site_b_metallb_l2_advertisement_name: hcp-l2-advertisement
+# Five IPs reserved for Site-B HCP-related LoadBalancer services.
+site_b_hcp_metallb_range: 10.23.22.132-10.23.22.136
+
+# Optional: install LVM on Site-B as part of the same policy set.
+# Leave disabled until you confirm unused disk device paths on the Site-B bare-metal nodes.
+site_b_lvm_policy_enabled: false
+site_b_lvm_namespace: "{{ site_a_lvm_namespace }}"
+site_b_lvm_subscription_channel: "{{ site_a_lvm_subscription_channel }}"
+site_b_lvm_operator_source: "{{ site_a_lvm_operator_source }}"
+site_b_lvm_operator_source_namespace: "{{ site_a_lvm_operator_source_namespace }}"
+site_b_lvm_install_plan_approval: "{{ site_a_lvm_install_plan_approval }}"
+site_b_lvm_cluster_name: "{{ site_a_lvm_cluster_name }}"
+site_b_lvm_device_class_name: "{{ site_a_lvm_device_class_name }}"
+site_b_lvm_storage_class_name: "lvms-{{ site_b_lvm_device_class_name }}"
+site_b_lvm_device_paths: []
+site_b_lvm_allow_all_unused_devices: false
+site_b_lvm_make_default_storageclass: true
+# Default Site-B tenant values used by the HCP tenant loop.
+# This does not require a full local MCE install on Site-B when using hub-managed mode;
+# the hub enables the HyperShift Operator on Site-B through the hypershift-addon.
+site_b_hcp_cluster_name: site-b-hcp-t1-px
+site_b_hcp_namespace: clusters
+site_b_hcp_nodepool_replicas: 3
+site_b_hcp_worker_cores: 8
+site_b_hcp_worker_memory: 8Gi
+site_b_hcp_release_image: "{{ bm_cluster_release_image }}"
+site_b_hcp_channel: fast-4.21
+site_b_hcp_pull_secret_name: openshift-pull-secret
+site_b_hcp_ssh_key_name: tenant-ssh-key
+site_b_hcp_machine_config_name: px-non-rotational
+site_b_hcp_etcd_volume_size: 8Gi
+site_b_hcp_snapshot_class: "{{ portworx_hcp_snapshot_class }}"
+site_b_hcp_tenant_px_storage_class: "{{ portworx_hcp_tenant_px_storage_class }}"
+site_b_hcp_extra_disk_storage_class: "{{ site_b_hcp_tenant_px_storage_class }}"
+site_b_hcp_enable_extra_disks: true
+site_b_hcp_extra_disks:
+  - name: extra-disk-1
+    size: 3Gi
+  - name: extra-disk-2
+    size: 64Gi
+  - name: extra-disk-3
+    size: 100Gi
+# Guest network CIDRs. Keep these non-overlapping with the hosting clusters and Site-A HCP.
+site_b_hcp_cluster_cidr: 10.148.0.0/14
+site_b_hcp_service_cidr: 172.33.0.0/16
+# HCP backing storage on the Site-B hosting cluster.
+# For this lab we pin HCP etcd, worker VM root volumes, and hosted-cluster storage passthrough
+# to the role-specific Portworx/Pure StorageClasses below.
+site_b_hcp_etcd_storage_class: "{{ portworx_hcp_etcd_storage_class }}"
+site_b_hcp_root_volume_storage_class: "{{ portworx_hcp_root_volume_storage_class }}"
+site_b_hcp_root_volume_size: "{{ portworx_hcp_root_volume_size }}"
+site_b_hcp_root_volume_access_modes: "{{ portworx_hcp_root_volume_access_modes }}"
+site_b_hcp_root_volume_volume_mode: "{{ portworx_hcp_root_volume_volume_mode }}"
+site_b_hcp_enable_root_volume_cache: "{{ portworx_hcp_enable_root_volume_cache }}"
+site_b_hcp_enable_storage_passthrough: true
+site_b_hcp_passthrough_infra_storage_class: "{{ portworx_hcp_passthrough_infra_storage_class }}"
+site_b_hcp_passthrough_guest_storage_class: "{{ portworx_hcp_guest_storage_class }}"
+# Safe default: do not delete/recreate an existing hosted cluster unless explicitly requested.
+site_b_hcp_recreate: false
+site_b_hcp_pull_secret_file: "{{ build_root }}/site-b-hcp/pull-secret.json"
+site_b_hcp_ssh_key_file: "{{ build_root }}/site-b-hcp/ssh.pub"
+site_b_hcp_cli_path: "{{ build_root }}/bin/hcp"
+
+# ---------------------------------------------------------------------------
+# Portworx Enterprise with Everpure/Pure FlashArray on Site-A and Site-B
+# ---------------------------------------------------------------------------
+# These policies prepare the bare-metal OpenShift clusters for Portworx using
+# Pure FlashArray / Everpure backed cloud drives over Fibre Channel.
+# The policy is deliberately not part of the default HCP flow because the
+# MachineConfig rolls/reboots the nodes.
+portworx_pure_policy_namespace: portworx-pure-policies
+portworx_pure_policy_placement_name: portworx-pure-placement
+portworx_pure_policy_binding_name: portworx-pure-binding
+portworx_pure_policy_remediation_action: enforce
+portworx_pure_policy_rendered_dir: "{{ build_root }}/portworx-pure-policies"
+portworx_pure_policy_cluster_label_key: portworx-pure
+portworx_pure_policy_cluster_label_value: "true"
+portworx_pure_managed_clusters:
+  - "{{ bm_cluster_name }}"
+  - "{{ site_b_cluster_name }}"
+portworx_pure_managed_clustersets:
+  - "{{ bm_clusterset }}"
+  - "{{ site_b_clusterset }}"
+
+# Script/playbook switches. Node prep can be applied without an API token.
+# Full install requires vault_pure_flasharray_api_token.
+portworx_pure_apply_node_prep: true
+portworx_pure_apply_operator: true
+portworx_pure_apply_storagecluster: true
+portworx_pure_tolerate_unreachable: false
+
+# Portworx Operator / StorageCluster settings.
+portworx_namespace: portworx
+portworx_operatorgroup_name: portworx-operator-group
+portworx_subscription_name: portworx-certified
+portworx_operator_package_name: portworx-certified
+portworx_operator_channel: stable
+portworx_operator_source: certified-operators
+portworx_operator_source_namespace: openshift-marketplace
+portworx_storagecluster_name: px-cluster-flasharray
+# StorageCluster generated from the Portworx 3.6.1.1 KDS template.
+# Keep the CR name stable so policy re-apply overwrites the same object on Site-A/Site-B.
+portworx_install_source: "https://install.portworx.com/3.6?operator=true&mc=false&kbver=1.31.0&ns=portworx&b=true&kvdbtls=true&certmgr=true&iop=6&s=%22size%3D2000%22&j=size%3D3&pureSanType=FC&ce=pure&dmthin=true&r=17001&c=px-cluster-eb3d29ae-abcb-4581-90bd-4164cc3cbe23&osft=true&stork=true&csi=true&mon=true&aut=false&tel=true&st=k8s"
+portworx_image: docker.io/portworx/oci-monitor:3.6.1.1
+portworx_start_port: 17001
+portworx_cloud_drive_size_gb: 2000
+portworx_journal_device_size_gb: 3
+# Optional full Portworx cloud-drive strings. Leave empty to auto-build size=<GB>.
+# Examples for advanced tuning can be set in vault/main vars if needed.
+# portworx_cloud_drive_spec: "size=2000"
+# portworx_journal_device_spec: "size=3"
+portworx_default_io_profile: "6"
+portworx_misc_args: " -T px-storev2 "
+portworx_kvdb_enable_tls: true
+portworx_cert_manager_enabled: true
+portworx_kube_datastore_enabled: true
+portworx_enable_stork: true
+portworx_enable_csi: true
+portworx_enable_telemetry: true
+portworx_prometheus_export_metrics: true
+# Enable the Portworx Dynamic Plugin in the OpenShift Console on Site-A/Site-B.
+# This adds the Portworx navigation item and VM/PVC/storage tabs in the OpenShift UI.
+portworx_enable_openshift_console_plugin: true
+portworx_openshift_console_plugin_name: portworx
+
+# Everpure/Pure FlashArray details.
+# pure.json requires an API token, not the FlashArray login password.
+# Preferred flow:
+#   1) Store the FlashArray login password in Ansible Vault as vault_pure_flasharray_password.
+#   2) Run ./scripts/create-pure-api-token.sh to generate/rotate an API token.
+#   3) Run ./scripts/run-portworx-pure-install.sh.
+# You can still bypass auto-generation by setting vault_pure_flasharray_api_token directly in vault.yml.
+pure_flasharray_name: SV16-X70R4-B06-09
+pure_flasharray_mgmt_endpoint: "10.23.22.50"
+pure_flasharray_ct0_endpoint: "10.23.22.51"
+pure_flasharray_ct1_endpoint: "10.23.22.52"
+pure_flasharray_file_vip: "10.23.22.55"
+pure_flasharray_username: pureuser
+pure_flasharray_password: "{{ vault_pure_flasharray_password | default('') }}"
+pure_flasharray_api_token: "{{ vault_pure_flasharray_api_token | default('') }}"
+pure_flasharray_generated_token_file: "{{ build_root }}/pure/generated-flasharray-token.yml"
+# The purefa_token module only returns the token when it creates/rotates it.
+# Keep true for automation so the repo can capture the token into the generated local vars file.
+pure_flasharray_token_recreate: true
+# Optional token expiry, examples: 23d, 12h, 4w. Empty means no expiry.
+pure_flasharray_token_timeout: ""
+pure_flasharray_realm: ""
+pure_flasharray_pod: ""
+portworx_pure_san_type: FC
+# Enable iscsid only when changing portworx_pure_san_type to iSCSI.
+portworx_pure_enable_iscsid: false
+
+
+# ---------------------------------------------------------------------------
+# HCP tenant authentication policy
+# ---------------------------------------------------------------------------
+# Applies HTPasswd OAuth to the HostedCluster resources on Site-A/Site-B.
+# In HCP, OAuth configuration is synced from the hosting cluster via the
+# HostedCluster resource, not by patching OAuth directly inside the guest cluster.
+hcp_tenant_policy_namespace: hcp-tenant-auth-policies
+hcp_tenant_policy_rendered_dir: "{{ build_root }}/hcp-tenant-auth-policies"
+hcp_tenant_policy_remediation_action: enforce
+
+# Hosting clusters that own the HostedCluster resources.
+hcp_tenant_site_a_hosting_placement_name: hcp-tenant-auth-site-a-hosting
+hcp_tenant_site_b_hosting_placement_name: hcp-tenant-auth-site-b-hosting
+hcp_tenant_site_a_hosting_binding_name: hcp-tenant-auth-site-a-hosting-binding
+hcp_tenant_site_b_hosting_binding_name: hcp-tenant-auth-site-b-hosting-binding
+hcp_tenant_site_a_hosting_label_key: hcp-tenant-auth-site-a
+hcp_tenant_site_a_hosting_label_value: "true"
+hcp_tenant_site_b_hosting_label_key: hcp-tenant-auth-site-b
+hcp_tenant_site_b_hosting_label_value: "true"
+hcp_tenant_site_a_oauth_policy_name: site-a-hcp-tenants-htpasswd-oauth
+hcp_tenant_site_b_oauth_policy_name: site-b-hcp-tenants-htpasswd-oauth
+site_a_hcp_htpasswd_secret_name: htpasswd-site-a-hcp-tenants
+site_b_hcp_htpasswd_secret_name: htpasswd-site-b-hcp-tenants
+
+# Legacy v18 tenant-policy names kept only so the v19 playbook can remove the
+# old tenant-targeted RBAC policy wiring if it exists.
+hcp_tenant_clusterset: hcp-tenants
+hcp_tenant_policy_placement_name: hcp-tenant-auth-placement
+hcp_tenant_policy_binding_name: hcp-tenant-auth-binding
+hcp_tenant_policy_cluster_label_key: hcp-tenant-auth
+hcp_tenant_policy_cluster_label_value: "true"
+hcp_tenant_cluster_admin_policy_name: hcp-tenant-admin-cluster-admin
+hcp_tenant_managed_clusters:
+  - site-a-hcp-t1-px
+  - site-a-hcp-t2-kv
+  - site-b-hcp-t1-px
+  - site-b-hcp-t2-kv
+hcp_tenant_required_managed_clusters:
+  - "{{ bm_cluster_name }}"
+  - "{{ site_b_cluster_name }}"
+
+# Tenant admin credentials.
+hcp_tenant_admin_username: admin
+hcp_tenant_admin_password_note: pureuser
+hcp_tenant_htpasswd_idp_name: local-htpasswd
+# htpasswd bcrypt entry generated with: htpasswd -nbB admin pureuser
+# Secret data is base64 for: admin:$2y$05$tZC6lUchB.enLXorMDXWZO4ZRibpivHlqB0/dUXKI.3HsWYcqF/PW
+hcp_tenant_htpasswd_file_b64: YWRtaW46JDJ5JDA1JHRaQzZsVWNoQi5lbkxYb3JNRFhXWk80WlJpYnBpdkhscUIwL2RVWEtJLjNIc1dZY3FGL1BXCg==

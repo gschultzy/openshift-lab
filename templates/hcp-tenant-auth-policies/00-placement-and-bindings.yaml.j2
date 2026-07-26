@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ hcp_tenant_policy_namespace }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ bm_clusterset }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+spec:
+  clusterSet: {{ bm_clusterset }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ site_b_clusterset }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+spec:
+  clusterSet: {{ site_b_clusterset }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ hcp_tenant_site_a_hosting_placement_name }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            name: {{ bm_cluster_name }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ hcp_tenant_site_b_hosting_placement_name }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            name: {{ site_b_cluster_name }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ hcp_tenant_site_a_hosting_binding_name }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: {{ hcp_tenant_site_a_hosting_placement_name }}
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: {{ hcp_tenant_site_a_oauth_policy_name }}
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ hcp_tenant_site_b_hosting_binding_name }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: {{ hcp_tenant_site_b_hosting_placement_name }}
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: {{ hcp_tenant_site_b_oauth_policy_name }}

@@ -1,0 +1,26 @@
+apiVersion: extensions.hive.openshift.io/v1beta1
+kind: AgentClusterInstall
+metadata:
+  name: {{ bm_cluster_name }}
+  namespace: {{ bm_cluster_name }}
+spec:
+  clusterDeploymentRef:
+    name: {{ bm_cluster_name }}
+  imageSetRef:
+    name: {{ bm_cluster_image_set_name }}
+  apiVIPs:
+    - {{ bm_api_vip }}
+  ingressVIPs:
+    - {{ bm_ingress_vip }}
+  networking:
+    clusterNetwork:
+      - cidr: {{ bm_cluster_network_cidr }}
+        hostPrefix: {{ bm_cluster_network_host_prefix }}
+    serviceNetwork:
+      - {{ bm_service_network_cidr }}
+    machineNetwork:
+      - cidr: {{ bm_machine_cidr }}
+  provisionRequirements:
+    controlPlaneAgents: {{ bm_control_plane_count }}
+    workerAgents: {{ bm_worker_count }}
+  sshPublicKey: '{{ ssh_pub_key }}'

@@ -1,0 +1,21 @@
+apiVersion: agent.open-cluster-management.io/v1
+kind: KlusterletAddonConfig
+metadata:
+  name: {{ bm_cluster_name }}
+  namespace: {{ bm_cluster_name }}
+spec:
+  clusterName: {{ bm_cluster_name }}
+  clusterNamespace: {{ bm_cluster_name }}
+  clusterLabels:
+    cloud: BareMetal
+    vendor: OpenShift
+  applicationManager:
+    enabled: true
+  certPolicyController:
+    enabled: true
+  iamPolicyController:
+    enabled: true
+  policyController:
+    enabled: true
+  searchCollector:
+    enabled: true

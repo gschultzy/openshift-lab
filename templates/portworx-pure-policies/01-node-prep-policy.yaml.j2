@@ -1,0 +1,66 @@
+{% if portworx_pure_apply_node_prep | default(true) | bool %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: portworx-pure-node-prep
+  namespace: {{ portworx_pure_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Portworx Pure FlashArray
+    policy.open-cluster-management.io/categories: Node Preparation
+    policy.open-cluster-management.io/controls: Multipath, udev, SCSI unit attention
+spec:
+  remediationAction: {{ portworx_pure_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: portworx-pure-node-prep
+        spec:
+          remediationAction: {{ portworx_pure_policy_remediation_action }}
+          severity: high
+          object-templates:
+{% for role in ['master', 'worker'] %}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: machineconfiguration.openshift.io/v1
+                kind: MachineConfig
+                metadata:
+                  labels:
+                    machineconfiguration.openshift.io/role: {{ role }}
+                  name: 99-portworx-pure-flasharray-{{ role }}
+                spec:
+                  config:
+                    ignition:
+                      version: 3.2.0
+                    storage:
+                      files:
+                        - path: /etc/multipath.conf
+                          filesystem: root
+                          mode: 0644
+                          overwrite: true
+                          contents:
+                            source: data:text/plain;charset=utf-8;base64,{{ lookup('file', repo_root ~ '/files/pure/multipath.conf') | b64encode }}
+                        - path: /etc/udev/rules.d/99-pure-storage.rules
+                          filesystem: root
+                          mode: 0644
+                          overwrite: true
+                          contents:
+                            source: data:text/plain;charset=utf-8;base64,{{ lookup('file', repo_root ~ '/files/pure/99-pure-storage.rules') | b64encode }}
+                        - path: /etc/udev/rules.d/90-scsi-ua.rules
+                          filesystem: root
+                          mode: 0644
+                          overwrite: true
+                          contents:
+                            source: data:text/plain;charset=utf-8;base64,{{ lookup('file', repo_root ~ '/files/pure/90-scsi-ua.rules') | b64encode }}
+                    systemd:
+                      units:
+                        - name: multipathd.service
+                          enabled: true
+{% if portworx_pure_enable_iscsid | default(false) | bool %}
+                        - name: iscsid.service
+                          enabled: true
+{% endif %}
+{% endfor %}
+{% endif %}

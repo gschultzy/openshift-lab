@@ -1,0 +1,33 @@
+{% if portworx_enable_openshift_console_plugin | default(true) | bool and portworx_pure_apply_operator | default(true) | bool %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: portworx-openshift-console-plugin
+  namespace: {{ portworx_pure_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Portworx Pure FlashArray
+    policy.open-cluster-management.io/categories: OpenShift Console
+    policy.open-cluster-management.io/controls: Enable Portworx Dynamic Plugin
+spec:
+  remediationAction: {{ portworx_pure_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: portworx-openshift-console-plugin
+        spec:
+          remediationAction: {{ portworx_pure_policy_remediation_action }}
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.openshift.io/v1
+                kind: Console
+                metadata:
+                  name: cluster
+                spec:
+                  plugins:
+                    - {{ portworx_openshift_console_plugin_name | default('portworx') }}
+{% endif %}

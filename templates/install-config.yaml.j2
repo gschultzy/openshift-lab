@@ -1,0 +1,40 @@
+apiVersion: v1
+baseDomain: {{ base_domain }}
+metadata:
+  name: {{ cluster_name }}
+compute:
+- name: worker
+  replicas: 0
+controlPlane:
+  name: master
+  replicas: 1
+networking:
+  networkType: {{ network_type }}
+  machineNetwork:
+  - cidr: {{ machine_cidr }}
+  clusterNetwork:
+  - cidr: {{ cluster_network_cidr }}
+    hostPrefix: {{ cluster_network_host_prefix }}
+  serviceNetwork:
+  - {{ service_network_cidr }}
+platform:
+{% if (sno_install_platform | default('none')) == 'vsphere' %}
+  vsphere:
+    vcenter: {{ vcenter_hostname }}
+    username: {{ vcenter_username }}
+    password: {{ vcenter_password }}
+    datacenter: {{ vsphere_datacenter }}
+    defaultDatastore: {{ vsphere_datastore }}
+    cluster: {{ vsphere_cluster }}
+    resourcePool: {{ vsphere_resource_pool }}
+    folder: {{ vsphere_folder }}
+    network: {{ vm_network_eth0 }}
+    apiVIPs:
+    - {{ api_vip }}
+    ingressVIPs:
+    - {{ ingress_vip }}
+{% else %}
+  none: {}
+{% endif %}
+pullSecret: '{{ pull_secret }}'
+sshKey: '{{ ssh_pub_key }}'

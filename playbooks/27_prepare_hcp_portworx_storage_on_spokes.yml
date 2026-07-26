@@ -1,0 +1,219 @@
+---
+- name: Prepare Portworx/Pure storage for HCP KubeVirt on Site-A and Site-B
+  hosts: localhost
+  gather_facts: false
+  vars:
+    hcp_portworx_sites:
+      - name: Site-A
+        cluster_name: "{{ bm_cluster_name }}"
+        kubeconfig_file: "{{ site_a_kubeconfig_file }}"
+      - name: Site-B
+        cluster_name: "{{ site_b_cluster_name }}"
+        kubeconfig_file: "{{ site_b_kubeconfig_file }}"
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Run the hub install or repair-hub-kubeconfig.sh first."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure spoke kubeconfig output directories exist
+      ansible.builtin.file:
+        path: "{{ item.kubeconfig_file | dirname }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ hcp_portworx_sites }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Extract spoke admin kubeconfigs from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ item.cluster_name }} get secret {{ item.cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ item.kubeconfig_file }}
+        chmod 0600 {{ item.kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+      loop: "{{ hcp_portworx_sites }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Validate and prepare Portworx/Pure HCP StorageClasses on each spoke
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K="{{ item.kubeconfig_file }}"
+        ROOT_SC="{{ portworx_hcp_root_volume_storage_class | default('hcp-pxe-boot') }}"
+        DATA_SC="{{ portworx_hcp_passthrough_infra_storage_class | default('hcp-pxe-data') }}"
+        ETCD_SC="{{ portworx_hcp_etcd_storage_class | default('hcp-pxe-etcd-pxfast') }}"
+        VMSTATE_SC="{{ portworx_vmstate_storage_class | default('vmstate') }}"
+        TENANT_PX_SC="{{ portworx_hcp_tenant_px_storage_class | default('hcp-fada-data') }}"
+
+        echo "# {{ item.name }} cluster and Portworx status"
+        oc --kubeconfig "$K" get clusterversion
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} get storagecluster {{ portworx_storagecluster_name }}
+        phase=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get storagecluster {{ portworx_storagecluster_name }} -o jsonpath='{.status.phase}')
+        if [ "$phase" != "Running" ]; then
+          echo "ERROR: Portworx StorageCluster is not Running on {{ item.name }}: $phase" >&2
+          exit 1
+        fi
+
+        echo
+        echo "# {{ item.name }} stale OCM APIService check"
+        stale=$(oc --kubeconfig "$K" get apiservice 2>/dev/null | egrep 'clusterview.open-cluster-management.io|v1beta1.proxy.open-cluster-management.io' | egrep 'False|ServiceNotFound' || true)
+        if [ -n "$stale" ]; then
+          echo "$stale"
+          echo "ERROR: Stale local OCM APIService objects remain on {{ item.name }}. Run ./scripts/cleanup-stale-ocm-apis-on-spokes.sh first." >&2
+          exit 1
+        fi
+        echo "OK: no stale clusterview/proxy APIService entries"
+
+        echo
+        echo "# Ensure {{ item.name }} HCP StorageClasses exist directly on the spoke"
+        cat <<EOF | oc --kubeconfig "$K" apply -f -
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: ${VMSTATE_SC}
+        parameters:
+          repl: "3"
+          sharedv4: "true"
+          sharedv4_svc_type: ClusterIP
+        provisioner: pxd.portworx.com
+        reclaimPolicy: Retain
+        volumeBindingMode: Immediate
+        allowVolumeExpansion: true
+        ---
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: ${TENANT_PX_SC}
+        parameters:
+          backend: pure_block
+          priority_io: high
+        provisioner: pxd.portworx.com
+        volumeBindingMode: WaitForFirstConsumer
+        allowVolumeExpansion: true
+        ---
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: ${ROOT_SC}
+          annotations:
+            storageclass.kubernetes.io/is-default-class: "true"
+            storageclass.kubevirt.io/is-default-virt-class: "true"
+        provisioner: pxd.portworx.com
+        parameters:
+          priority_io: high
+          repl: "2"
+          nodiscard: "true"
+        volumeBindingMode: Immediate
+        allowVolumeExpansion: true
+        ---
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: ${DATA_SC}
+        provisioner: pxd.portworx.com
+        parameters:
+          priority_io: high
+          repl: "2"
+          nodiscard: "true"
+        volumeBindingMode: Immediate
+        allowVolumeExpansion: true
+        ---
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: ${ETCD_SC}
+        provisioner: pxd.portworx.com
+        parameters:
+          priority_io: high
+          repl: "1"
+          fastpath: "true"
+        volumeBindingMode: Immediate
+        allowVolumeExpansion: true
+        EOF
+
+        echo
+        echo "# {{ item.name }} HCP StorageClass validation"
+        for sc in "$ROOT_SC" "$DATA_SC" "$ETCD_SC" "$VMSTATE_SC" "$TENANT_PX_SC"; do
+          for i in $(seq 1 30); do
+            if oc --kubeconfig "$K" get storageclass "$sc" >/dev/null 2>&1; then
+              oc --kubeconfig "$K" get storageclass "$sc"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: StorageClass $sc was not created on {{ item.name }}" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+        done
+
+        echo
+        echo "# Mark $ROOT_SC as the Kubernetes and OpenShift Virtualization default class"
+        for existing in $(oc --kubeconfig "$K" get sc -o name); do
+          oc --kubeconfig "$K" annotate "$existing" storageclass.kubernetes.io/is-default-class- --overwrite >/dev/null 2>&1 || true
+          oc --kubeconfig "$K" annotate "$existing" storageclass.kubevirt.io/is-default-virt-class- --overwrite >/dev/null 2>&1 || true
+        done
+        oc --kubeconfig "$K" annotate sc "$ROOT_SC" storageclass.kubernetes.io/is-default-class="true" --overwrite
+        oc --kubeconfig "$K" annotate sc "$ROOT_SC" storageclass.kubevirt.io/is-default-virt-class="true" --overwrite
+
+        echo
+        echo "# Patch StorageProfiles for HCP/KubeVirt usage"
+        patch_profile() {
+          local sc="$1"
+          local modes="$2"
+          local volume_mode="$3"
+          local patch
+          if oc --kubeconfig "$K" get storageprofile "$sc" >/dev/null 2>&1; then
+            patch=$(jq -nc --argjson modes "$modes" --arg volume_mode "$volume_mode" '{spec:{claimPropertySets:[{accessModes:$modes,volumeMode:$volume_mode}]}}')
+            oc --kubeconfig "$K" patch storageprofile "$sc" --type=merge -p "$patch"
+          else
+            echo "WARNING: StorageProfile $sc does not exist yet. CDI normally creates it automatically after the StorageClass appears."
+          fi
+        }
+        patch_profile "$ROOT_SC" '["ReadWriteMany"]' Block
+        patch_profile "$DATA_SC" '["ReadWriteMany"]' Block
+        patch_profile "$VMSTATE_SC" '["ReadWriteMany"]' Filesystem
+
+        echo
+        echo "# Patch HyperConverged vmStateStorageClass"
+        if oc --kubeconfig "$K" -n {{ site_a_virt_namespace }} get hyperconverged kubevirt-hyperconverged >/dev/null 2>&1; then
+          hc_patch=$(jq -nc --arg sc "$VMSTATE_SC" '{spec:{vmStateStorageClass:$sc}}')
+          oc --kubeconfig "$K" -n {{ site_a_virt_namespace }} patch hyperconverged kubevirt-hyperconverged --type=merge -p "$hc_patch"
+        else
+          echo "WARNING: HyperConverged/kubevirt-hyperconverged not found yet. The RHACM virtualization policy will set vmStateStorageClass."
+        fi
+
+        echo
+        echo "# Final {{ item.name }} StorageClass and StorageProfile summary"
+        oc --kubeconfig "$K" get sc "$ROOT_SC" "$DATA_SC" "$ETCD_SC" "$VMSTATE_SC" "$TENANT_PX_SC"
+        for sc in "$ROOT_SC" "$DATA_SC" "$VMSTATE_SC"; do
+          echo
+          echo "## StorageProfile $sc"
+          oc --kubeconfig "$K" get storageprofile "$sc" -o yaml | egrep -A8 -i 'claimPropertySets|accessModes|volumeMode' || true
+        done
+        echo
+        echo "## HyperConverged vmStateStorageClass"
+        oc --kubeconfig "$K" -n {{ site_a_virt_namespace }} get hyperconverged kubevirt-hyperconverged -o jsonpath='{.spec.vmStateStorageClass}{"\n"}' 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      loop: "{{ hcp_portworx_sites }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hcp_portworx_storage_prepare
+
+    - name: Print HCP Portworx storage preparation output
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ hcp_portworx_storage_prepare.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

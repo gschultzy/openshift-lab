@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ site_a_policy_namespace }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ bm_clusterset }}
+  namespace: {{ site_a_policy_namespace }}
+spec:
+  clusterSet: {{ bm_clusterset }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ site_a_policy_placement_name }}
+  namespace: {{ site_a_policy_namespace }}
+spec:
+{% if site_a_policy_tolerate_unreachable | default(false) | bool %}
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+      effect: NoSelect
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+      effect: NoSelect
+{% endif %}
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            {{ site_a_policy_cluster_label_key }}: "{{ site_a_policy_cluster_label_value }}"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: site-a-hcp-prereqs-binding
+  namespace: {{ site_a_policy_namespace }}
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: {{ site_a_policy_placement_name }}
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: site-a-openshift-virtualization
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: site-a-metallb-hcp
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: site-a-ingress-wildcards
+{% if site_a_lvm_policy_enabled | default(false) | bool %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: site-a-lvm-storage
+{% endif %}

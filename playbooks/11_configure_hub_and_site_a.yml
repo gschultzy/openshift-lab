@@ -1,0 +1,12 @@
+---
+- import_playbook: 02_add_sno_extra_disk.yml
+- import_playbook: 05_install_lvm_storage.yml
+- import_playbook: 04_configure_ad_dns.yml
+- import_playbook: 06_install_acm.yml
+- import_playbook: 07_configure_assisted_service.yml
+- import_playbook: 07_enable_baremetal_provisioning.yml
+- import_playbook: 07_validate_assisted_image_service.yml
+- import_playbook: 10_configure_bm_ad_dns.yml
+- import_playbook: 05_idrac_preflight.yml
+- import_playbook: 08_apply_baremetal_cluster.yml
+- import_playbook: 09_wait_baremetal_cluster.yml

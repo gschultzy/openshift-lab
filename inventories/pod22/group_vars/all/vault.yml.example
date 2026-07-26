@@ -1,0 +1,40 @@
+---
+# Deprecated location.
+# Put the real encrypted vault file here instead:
+#   inventories/pod22/group_vars/all/vault.yml
+#
+# Normal non-secret variables also live under:
+#   inventories/pod22/group_vars/all/main.yml
+#
+# Bootstrap:
+#   cp inventories/pod22/group_vars/all/vault.yml.example inventories/pod22/group_vars/all/vault.yml
+#   ansible-vault encrypt inventories/pod22/group_vars/all/vault.yml
+
+# Copy this file to vault.yml, fill in real values, then encrypt it with ansible-vault.
+
+vault_vcenter_password: "CHANGE_ME"
+vault_esxi_password: "CHANGE_ME"
+
+# Paste your full Red Hat pull secret JSON as a single-line string.
+vault_pull_secret: '{"auths":{}}'
+
+# SSH public key injected into the cluster nodes.
+vault_ssh_public_key: "ssh-ed25519 CHANGE_ME administrator@POD-22-VM-03"
+
+# Optional, only needed for AD DNS automation over WinRM.
+vault_ad_username: "POC\\administrator"
+vault_ad_password: "CHANGE_ME"
+
+# iDRAC credentials for Redfish virtual media automation.
+vault_idrac_username: "pureuser"
+vault_idrac_password: "CHANGE_ME"
+
+# Pure FlashArray / Everpure API token for Portworx pure.json.
+# Generate this on the FlashArray, for example with: pureadmin create --api-token
+# Do not store the array password in git.
+vault_pure_flasharray_api_token: "CHANGE_ME_FLASHARRAY_API_TOKEN"
+
+# Everpure/Pure FlashArray credentials for automated API token creation.
+# Store the login password only in Ansible Vault. The generated API token is written
+# to build/hub-sno/pure/generated-flasharray-token.yml with mode 0600.
+vault_pure_flasharray_password: "CHANGE_ME_FLASHARRAY_PASSWORD"

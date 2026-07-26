@@ -1,0 +1,219 @@
+---
+- name: Preflight checks for SNO on vSphere
+  hosts: ansible_controller
+  gather_facts: true
+  tasks:
+    - name: Validate required inventory variables are loaded
+      ansible.builtin.assert:
+        that:
+          - cluster_name is defined
+          - base_domain is defined
+          - sno_install_platform is defined
+          - machine_cidr is defined
+          - sno_node is defined
+          - sno_node.ip is defined
+          - sno_node.mac_eth0 is defined
+          - sno_node.primary_interface is defined
+          - vcenter_hostname is defined
+          - vcenter_username is defined
+          - vcenter_password is defined
+          - vsphere_datacenter is defined
+          - vsphere_esxi_hostname is defined
+          - vsphere_datastore is defined
+          - iso_upload_method is defined
+          - vm_network_eth0 is defined
+          - pull_secret is defined
+          - ssh_pub_key is defined
+        fail_msg: >-
+          Required variables are missing. Check that Ansible is loading
+          inventories/pod22/group_vars/all/main.yml and the encrypted
+          inventories/pod22/group_vars/all/vault.yml file.
+
+    - name: Validate optional vSphere platform variables
+      ansible.builtin.assert:
+        that:
+          - vsphere_cluster is defined
+          - vsphere_cluster | length > 0
+          - api_vip is defined
+          - ingress_vip is defined
+        fail_msg: >-
+          sno_install_platform is set to vsphere, but vsphere_cluster/api_vip/ingress_vip
+          are not fully defined. Either set a real vSphere cluster name or leave
+          sno_install_platform as none for this standalone ESXi lab.
+      when: sno_install_platform == 'vsphere'
+
+    - name: Show bastion OS
+      ansible.builtin.debug:
+        msg:
+          - "Ansible controller: {{ inventory_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Python: {{ ansible_python.executable }}"
+
+    - name: Confirm expected Ubuntu bastion version
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('24.04', '>=')
+        fail_msg: >-
+          This repo is currently set up for the Ubuntu 24.04.x LTS bastion.
+          Run scripts/bootstrap-ubuntu-24.04.sh first, or adjust the preflight if using another OS.
+
+    - name: Show target plan
+      ansible.builtin.debug:
+        msg:
+          - "Cluster: {{ cluster_name }}.{{ base_domain }}"
+          - "Install platform: {{ sno_install_platform }}"
+          - "SNO node IP: {{ sno_node.ip }}"
+          - "API DNS target: {{ sno_api_ip }}"
+          - "Ingress DNS target: {{ sno_ingress_ip }}"
+          - "vCenter: {{ vcenter_hostname }}"
+          - "ESXi host: {{ vsphere_esxi_hostname }}"
+          - "Datastore: {{ vsphere_datastore }}"
+          - "Primary network: {{ vm_network_eth0 }}"
+          - "Secondary network enabled: {{ sno_node.secondary_nic_enabled | default(false) }}"
+
+
+
+    - name: Discover vSphere inventory names
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/discover-vsphere-inventory.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+      changed_when: false
+      no_log: true
+      register: vsphere_inventory_raw
+
+    - name: Parse discovered vSphere inventory
+      ansible.builtin.set_fact:
+        vsphere_inventory: "{{ vsphere_inventory_raw.stdout | from_json }}"
+
+    - name: Show discovered vSphere inventory summary
+      ansible.builtin.debug:
+        msg:
+          - "Datacenters: {{ vsphere_inventory.datacenters | map(attribute='name') | list }}"
+          - "Hosts: {{ vsphere_inventory.hosts }}"
+          - "Datastores: {{ vsphere_inventory.datastores }}"
+          - "Networks: {{ vsphere_inventory.networks }}"
+          - "VM folders: {{ vsphere_inventory.vm_folders }}"
+          - "Resource pools: {{ vsphere_inventory.resource_pools }}"
+
+    - name: Validate configured vSphere inventory names exist
+      ansible.builtin.assert:
+        that:
+          - vsphere_datacenter in (vsphere_inventory.datacenters | map(attribute='name') | list)
+          - vsphere_datastore in (vsphere_inventory.datastores | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list)
+          - vm_network_eth0 in (vsphere_inventory.networks | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list)
+        fail_msg: >-
+          One or more configured vSphere inventory names do not exist exactly as written.
+          Run playbooks/00_discover_vsphere_inventory.yml and update
+          inventories/pod22/group_vars/all/main.yml. For this SNO hub, only vm_network_eth0 is required.
+
+    - name: Validate optional secondary vSphere inventory name exists
+      ansible.builtin.assert:
+        that:
+          - vm_network_eth1 is defined
+          - vm_network_eth1 | length > 0
+          - vm_network_eth1 in (vsphere_inventory.networks | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list)
+        fail_msg: >-
+          sno_node.secondary_nic_enabled is true, but vm_network_eth1 is empty or does not exist.
+          Set vm_network_eth1 to a real port group or disable the secondary NIC.
+      when: sno_node.secondary_nic_enabled | default(false) | bool
+
+    - name: Validate ESXi SSH upload settings
+      ansible.builtin.assert:
+        that:
+          - esxi_hostname is defined
+          - esxi_username is defined
+          - esxi_password is defined
+          - esxi_datastore_mount is defined
+          - iso_datastore_path is defined
+          - iso_vsphere_path is defined
+        fail_msg: >-
+          iso_upload_method is esxi_ssh but ESXi SSH/SCP upload variables are missing.
+          Set vault_esxi_password in inventories/pod22/group_vars/all/vault.yml.
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Check ESXi SSH is reachable for ISO upload
+      ansible.builtin.wait_for:
+        host: "{{ esxi_hostname }}"
+        port: 22
+        timeout: 10
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Check required local commands
+      ansible.builtin.command: "bash -lc 'command -v {{ item }}'"
+      environment:
+        PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
+        PYTHONPATH: "/usr/lib/python3/dist-packages:{{ ansible_env.PYTHONPATH | default('') }}"
+      changed_when: false
+      loop:
+        - ansible-playbook
+        - curl
+        - git
+        - jq
+        - kubectl
+        - oc
+        - openshift-install
+        - python3
+        - sshpass
+        - tar
+        - nmstatectl
+
+    - name: Show nmstatectl version
+      ansible.builtin.command: bash -lc 'nmstatectl --version || nmstatectl -h | head -1'
+      environment:
+        PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
+        PYTHONPATH: "/usr/lib/python3/dist-packages:{{ ansible_env.PYTHONPATH | default('') }}"
+      changed_when: false
+      register: nmstatectl_version
+
+    - name: Display nmstatectl version
+      ansible.builtin.debug:
+        msg: "nmstatectl is available: {{ nmstatectl_version.stdout | default('version output not available') }}"
+
+    - name: Check required Python modules in current Ansible interpreter
+      ansible.builtin.command: >-
+        {{ ansible_python.executable }} -c
+        "import yaml, requests, netaddr, jmespath, pyVmomi, pyVim; print('python modules ok')"
+      changed_when: false
+
+    - name: Check optional WinRM Python module for AD DNS automation
+      ansible.builtin.command: >-
+        {{ ansible_python.executable }} -c "import winrm; print('winrm module ok')"
+      changed_when: false
+      failed_when: false
+      register: winrm_check
+
+    - name: Show WinRM module status
+      ansible.builtin.debug:
+        msg: >-
+          pywinrm {{ 'is installed; AD DNS automation can use WinRM.' if winrm_check.rc == 0 else 'is not installed; skip AD DNS automation or install requirements-python.txt in the venv.' }}
+
+    - name: Validate SNO static IPs are in the machine CIDR
+      ansible.builtin.assert:
+        that:
+          # ansible.utils.ipaddr returns the matching IP value when true.
+          # Newer ansible-core requires assert conditionals to resolve to a real boolean,
+          # so compare the filter result explicitly instead of using the returned string directly.
+          - "(sno_node.ip | ansible.utils.ipaddr(machine_cidr)) != false"
+          - "(sno_api_ip | ansible.utils.ipaddr(machine_cidr)) != false"
+          - "(sno_ingress_ip | ansible.utils.ipaddr(machine_cidr)) != false"
+        fail_msg: "SNO node IP, API DNS target, and Ingress DNS target must be inside {{ machine_cidr }}."
+
+    - name: Check vCenter API is reachable
+      community.vmware.vmware_datacenter_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+      delegate_to: localhost
+      register: dc_info
+
+    - name: Show vCenter datacenters found
+      ansible.builtin.debug:
+        var: dc_info.datacenter_info

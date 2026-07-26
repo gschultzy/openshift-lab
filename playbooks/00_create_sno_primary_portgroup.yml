@@ -1,0 +1,125 @@
+---
+- name: Create or validate SNO primary ESXi port group
+  hosts: ansible_controller
+  gather_facts: true
+  tasks:
+    - name: Show requested SNO primary port group
+      ansible.builtin.debug:
+        msg:
+          - "ESXi host: {{ esxi_hostname }}"
+          - "vSwitch: {{ esxi_vswitch_name }}"
+          - "Port group: {{ vm_network_eth0 }}"
+          - "VLAN ID on port group: {{ sno_primary_portgroup_vlan_id }}"
+          - "Note: use VLAN ID 0 if the physical switchport is access VLAN 3522; use 3522 only if the ESXi uplink is trunked."
+
+    - name: Validate ESXi SSH variables for port group creation
+      ansible.builtin.assert:
+        that:
+          - esxi_hostname is defined
+          - esxi_username is defined
+          - esxi_password is defined
+          - esxi_vswitch_name is defined
+          - vm_network_eth0 is defined
+          - vm_network_eth0 | length > 0
+          - sno_primary_portgroup_vlan_id is defined
+        fail_msg: >-
+          Required ESXi port group variables are missing. Check main.yml and vault.yml.
+
+    - name: Check ESXi SSH port is reachable
+      ansible.builtin.wait_for:
+        host: "{{ esxi_hostname }}"
+        port: 22
+        timeout: 10
+
+    - name: Show existing standard vSwitches
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "esxcli network vswitch standard list"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      register: esxi_vswitches
+      no_log: true
+
+    - name: Validate requested standard vSwitch exists
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "esxcli network vswitch standard list | grep -w '{{ esxi_vswitch_name }}'"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      no_log: true
+
+    - name: Create SNO primary port group if missing
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "esxcli network vswitch standard portgroup list | awk '{print $1}' | grep -x '{{ vm_network_eth0 }}' >/dev/null || esxcli network vswitch standard portgroup add -p '{{ vm_network_eth0 }}' -v '{{ esxi_vswitch_name }}'"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: true
+      no_log: true
+
+    - name: Set SNO primary port group VLAN ID
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "esxcli network vswitch standard portgroup set -p '{{ vm_network_eth0 }}' -v '{{ sno_primary_portgroup_vlan_id }}'"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: true
+      no_log: true
+
+    - name: Show standard port groups after change
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "esxcli network vswitch standard portgroup list"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      register: esxi_portgroups
+      no_log: true
+
+    - name: Port group creation complete
+      ansible.builtin.debug:
+        msg:
+          - "Created/validated port group {{ vm_network_eth0 }} on {{ esxi_vswitch_name }}."
+          - "Run playbooks/00_discover_vsphere_inventory.yml next and confirm {{ vm_network_eth0 }} appears."

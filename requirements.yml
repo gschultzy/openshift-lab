@@ -1,0 +1,13 @@
+---
+# Ansible Galaxy collections used by the automation.
+# Install from the Ubuntu bastion after activating the repo venv:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.vmware
+  - name: vmware.vmware
+  - name: ansible.windows
+  - name: community.windows
+  - name: ansible.utils
+  - name: community.general
+  - name: purestorage.flasharray
+

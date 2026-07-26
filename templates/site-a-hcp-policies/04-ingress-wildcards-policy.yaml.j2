@@ -1,0 +1,32 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: site-a-ingress-wildcards
+  namespace: {{ site_a_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Site-A HCP
+    policy.open-cluster-management.io/categories: Networking
+    policy.open-cluster-management.io/controls: Allow wildcard routes for HCP ingress
+spec:
+  remediationAction: {{ site_a_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: site-a-ingress-wildcards
+        spec:
+          remediationAction: {{ site_a_policy_remediation_action }}
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.openshift.io/v1
+                kind: IngressController
+                metadata:
+                  name: default
+                  namespace: openshift-ingress-operator
+                spec:
+                  routeAdmission:
+                    wildcardPolicy: WildcardsAllowed

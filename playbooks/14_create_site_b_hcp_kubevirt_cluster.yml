@@ -1,0 +1,254 @@
+---
+- name: Create a Portworx/Pure backed HCP cluster on Site-B using the KubeVirt platform
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure Site-B kubeconfig output directory exists
+      ansible.builtin.file:
+        path: "{{ site_b_kubeconfig_file | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Extract Site-B admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Create HCP working directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ site_b_hcp_pull_secret_file | dirname }}"
+        - "{{ site_b_hcp_cli_path | dirname }}"
+
+    - name: Write pull secret for HCP manifests/export helper
+      ansible.builtin.copy:
+        content: "{{ pull_secret }}"
+        dest: "{{ site_b_hcp_pull_secret_file }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Write SSH public key for hosted cluster workers
+      ansible.builtin.copy:
+        content: "{{ ssh_pub_key }}
+"
+        dest: "{{ site_b_hcp_ssh_key_file }}"
+        mode: "0644"
+
+    - name: Install hcp CLI if needed for kubeconfig export
+      ansible.builtin.command: >-
+        {{ repo_root }}/scripts/install-hcp-cli-from-cluster.sh
+        {{ hub_kubeconfig }}
+        {{ site_b_hcp_cli_path }}
+        {{ site_b_kubeconfig_file }}
+      changed_when: true
+
+    - name: Ensure hosted cluster namespace exists on Site-B
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc --kubeconfig {{ site_b_kubeconfig_file }} create namespace {{ site_b_hcp_namespace }} --dry-run=client -o yaml | oc --kubeconfig {{ site_b_kubeconfig_file }} apply -f -
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Determine and validate Site-B HCP Portworx/Pure storage classes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        etcd_sc="{{ site_b_hcp_etcd_storage_class | default(portworx_hcp_infra_storage_class, true) }}"
+        root_sc="{{ site_b_hcp_root_volume_storage_class | default(portworx_hcp_infra_storage_class, true) }}"
+        pass_infra_sc="{{ site_b_hcp_passthrough_infra_storage_class | default(portworx_hcp_passthrough_infra_storage_class, true) }}"
+        tenant_px_sc="{{ site_b_hcp_tenant_px_storage_class | default('hcp-fada-data') }}"
+        extra_disk_sc="{{ site_b_hcp_extra_disk_storage_class | default(site_b_hcp_tenant_px_storage_class, true) }}"
+
+        for sc in "$etcd_sc" "$root_sc" "$pass_infra_sc" "$tenant_px_sc" "$extra_disk_sc"; do
+          if [ -z "$sc" ]; then
+            echo "ERROR: one of the required HCP storage classes resolved to an empty value" >&2
+            exit 1
+          fi
+          oc --kubeconfig {{ site_b_kubeconfig_file }} get storageclass "$sc" >/dev/null
+        done
+
+        if oc --kubeconfig {{ site_b_kubeconfig_file }} -n portworx get storagecluster px-cluster-flasharray >/dev/null 2>&1; then
+          phase=$(oc --kubeconfig {{ site_b_kubeconfig_file }} -n portworx get storagecluster px-cluster-flasharray -o jsonpath='{.status.phase}')
+          if [ "$phase" != "Running" ]; then
+            echo "ERROR: Portworx StorageCluster px-cluster-flasharray is not Running on Site-B: $phase" >&2
+            exit 1
+          fi
+        fi
+
+        stale=$(oc --kubeconfig {{ site_b_kubeconfig_file }} get apiservice 2>/dev/null | egrep 'clusterview.open-cluster-management.io|v1beta1.proxy.open-cluster-management.io' | egrep 'False|ServiceNotFound' || true)
+        if [ -n "$stale" ]; then
+          echo "ERROR: stale OCM APIService objects still exist on Site-B. Run ./scripts/cleanup-stale-ocm-apis-on-spokes.sh first." >&2
+          echo "$stale" >&2
+          exit 1
+        fi
+
+        echo "etcd_storage_class=$etcd_sc"
+        echo "root_volume_storage_class=$root_sc"
+        echo "passthrough_infra_storage_class=$pass_infra_sc"
+        echo "tenant_px_storage_class=$tenant_px_sc"
+        echo "extra_disk_storage_class=$extra_disk_sc"
+      args:
+        executable: /bin/bash
+      register: hcp_storage_settings
+      changed_when: false
+
+    - name: Patch Site-B StorageProfile for RWX Block VM/HCP usage
+      ansible.builtin.shell: |
+        set -euo pipefail
+        sc="{{ site_b_hcp_root_volume_storage_class | default(portworx_hcp_infra_storage_class, true) }}"
+        for existing in $(oc --kubeconfig {{ site_b_kubeconfig_file }} get sc -o name); do
+          oc --kubeconfig {{ site_b_kubeconfig_file }} annotate "$existing" storageclass.kubevirt.io/is-default-virt-class- --overwrite >/dev/null 2>&1 || true
+        done
+        oc --kubeconfig {{ site_b_kubeconfig_file }} annotate sc "$sc" storageclass.kubevirt.io/is-default-virt-class="true" --overwrite
+
+        if oc --kubeconfig {{ site_b_kubeconfig_file }} get storageprofile "$sc" >/dev/null 2>&1; then
+          oc --kubeconfig {{ site_b_kubeconfig_file }} patch storageprofile "$sc" --type=merge             -p '{"spec":{"claimPropertySets":[{"accessModes":["ReadWriteMany"],"volumeMode":"Block"}]}}'
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Create HCP pull secret and SSH key secrets on Site-B
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} create secret generic {{ site_b_hcp_pull_secret_name }}           --from-file=.dockerconfigjson={{ site_b_hcp_pull_secret_file }}           --type=kubernetes.io/dockerconfigjson           --dry-run=client -o yaml | oc --kubeconfig {{ site_b_kubeconfig_file }} apply -f -
+
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} create secret generic {{ site_b_hcp_ssh_key_name }}           --from-file=id_rsa.pub={{ site_b_hcp_ssh_key_file }}           --dry-run=client -o yaml | oc --kubeconfig {{ site_b_kubeconfig_file }} apply -f -
+      args:
+        executable: /bin/bash
+      changed_when: true
+      no_log: true
+
+    - name: Render Site-B HostedCluster and NodePool manifest
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/hcp/hostedcluster-nodepool.yaml.j2"
+        dest: "{{ site_b_hcp_pull_secret_file | dirname }}/{{ site_b_hcp_cluster_name }}-hostedcluster-nodepool.yaml"
+        mode: "0600"
+      vars:
+        hcp_cluster_name: "{{ site_b_hcp_cluster_name }}"
+        hcp_namespace: "{{ site_b_hcp_namespace }}"
+        hcp_channel: "{{ site_b_hcp_channel }}"
+        hcp_etcd_volume_size: "{{ site_b_hcp_etcd_volume_size }}"
+        hcp_etcd_storage_class: "{{ site_b_hcp_etcd_storage_class | default(portworx_hcp_etcd_storage_class, true) }}"
+        hcp_release_image: "{{ site_b_hcp_release_image }}"
+        hcp_pull_secret_name: "{{ site_b_hcp_pull_secret_name }}"
+        hcp_ssh_key_name: "{{ site_b_hcp_ssh_key_name }}"
+        hcp_cluster_cidr: "{{ site_b_hcp_cluster_cidr }}"
+        hcp_service_cidr: "{{ site_b_hcp_service_cidr }}"
+        hcp_passthrough_infra_storage_class: "{{ site_b_hcp_passthrough_infra_storage_class | default(portworx_hcp_passthrough_infra_storage_class, true) }}"
+        hcp_passthrough_guest_storage_class: "{{ site_b_hcp_passthrough_guest_storage_class | default(portworx_hcp_guest_storage_class, true) }}"
+        hcp_tenant_px_storage_class: "{{ site_b_hcp_tenant_px_storage_class }}"
+        hcp_snapshot_class: "{{ site_b_hcp_snapshot_class }}"
+        hcp_nodepool_replicas: "{{ site_b_hcp_nodepool_replicas }}"
+        hcp_machine_config_name: "{{ site_b_hcp_machine_config_name }}"
+        hcp_worker_cores: "{{ site_b_hcp_worker_cores }}"
+        hcp_worker_memory: "{{ site_b_hcp_worker_memory }}"
+        hcp_root_volume_size: "{{ site_b_hcp_root_volume_size }}"
+        hcp_root_volume_storage_class: "{{ site_b_hcp_root_volume_storage_class | default(portworx_hcp_root_volume_storage_class, true) }}"
+        hcp_root_volume_access_modes: "{{ site_b_hcp_root_volume_access_modes }}"
+        hcp_root_volume_volume_mode: "{{ site_b_hcp_root_volume_volume_mode }}"
+        hcp_enable_extra_disks: "{{ site_b_hcp_enable_extra_disks }}"
+        hcp_extra_disk_storage_class: "{{ site_b_hcp_extra_disk_storage_class }}"
+        hcp_extra_disks: "{{ site_b_hcp_extra_disks }}"
+
+    - name: Show HCP create settings
+      ansible.builtin.debug:
+        msg:
+          - "HCP hosting cluster kubeconfig: {{ site_b_kubeconfig_file }}"
+          - "Hosted cluster name: {{ site_b_hcp_cluster_name }}"
+          - "Hosted cluster namespace: {{ site_b_hcp_namespace }}"
+          - "Channel: {{ site_b_hcp_channel }}"
+          - "NodePool replicas: {{ site_b_hcp_nodepool_replicas }}"
+          - "Worker VM size: {{ site_b_hcp_worker_cores }} cores / {{ site_b_hcp_worker_memory }}"
+          - "Release image: {{ site_b_hcp_release_image }}"
+          - "Guest cluster CIDR: {{ site_b_hcp_cluster_cidr | default('', true) }}"
+          - "Guest service CIDR: {{ site_b_hcp_service_cidr | default('', true) }}"
+          - "etcd StorageClass: {{ site_b_hcp_etcd_storage_class | default(portworx_hcp_etcd_storage_class, true) }}"
+          - "root volume StorageClass: {{ site_b_hcp_root_volume_storage_class | default(portworx_hcp_root_volume_storage_class, true) }}"
+          - "root volume access/volume mode: {{ site_b_hcp_root_volume_access_modes }} / {{ site_b_hcp_root_volume_volume_mode }}"
+          - "root volume size: {{ site_b_hcp_root_volume_size }}Gi"
+          - "hosted-cluster storage mappings: {{ site_b_hcp_passthrough_infra_storage_class | default(portworx_hcp_passthrough_infra_storage_class, true) }}/{{ site_b_hcp_passthrough_guest_storage_class | default(portworx_hcp_guest_storage_class, true) }}, {{ site_b_hcp_tenant_px_storage_class }}/{{ site_b_hcp_tenant_px_storage_class }}"
+          - "tenant PX extra disk StorageClass: {{ site_b_hcp_extra_disk_storage_class }}"
+          - "recreate existing cluster: {{ site_b_hcp_recreate | default(false) }}"
+
+    - name: Optionally delete existing Site-B HCP test cluster before recreation
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if ! oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster {{ site_b_hcp_cluster_name }} >/dev/null 2>&1; then
+          echo "No existing HostedCluster {{ site_b_hcp_cluster_name }} found on Site-B; nothing to recreate."
+          exit 0
+        fi
+
+        echo "Deleting existing NodePool/HostedCluster {{ site_b_hcp_cluster_name }} on Site-B because recreate=true"
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} delete nodepool {{ site_b_hcp_cluster_name }} --ignore-not-found --wait=false || true
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} delete hostedcluster {{ site_b_hcp_cluster_name }} --ignore-not-found --wait=false || true
+
+        for i in $(seq 1 120); do
+          if ! oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster {{ site_b_hcp_cluster_name }} >/dev/null 2>&1              && ! oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get nodepool {{ site_b_hcp_cluster_name }} >/dev/null 2>&1; then
+            echo "Existing Site-B HCP resources removed."
+            exit 0
+          fi
+          echo "Waiting for existing Site-B HCP resources to delete... $i/120"
+          sleep 10
+        done
+
+        echo "ERROR: Timed out waiting for existing Site-B HCP resources to delete." >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: true
+      when: site_b_hcp_recreate | default(false) | bool
+
+    - name: Apply manifest-backed Site-B HostedCluster and NodePool if it does not already exist
+      ansible.builtin.shell: |
+        set -euo pipefail
+        manifest="{{ site_b_hcp_pull_secret_file | dirname }}/{{ site_b_hcp_cluster_name }}-hostedcluster-nodepool.yaml"
+
+        if oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster {{ site_b_hcp_cluster_name }} >/dev/null 2>&1; then
+          echo "HostedCluster {{ site_b_hcp_cluster_name }} already exists in namespace {{ site_b_hcp_namespace }}."
+          echo "Existing HCP storage/settings:"
+          oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster {{ site_b_hcp_cluster_name }} -o yaml | egrep -A18 -i 'channel:|release:|etcd:|storageClass|storageDriver|baseDomainPassthrough|infraStorageClass|guestStorageClass' || true
+          oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get nodepool {{ site_b_hcp_cluster_name }} -o yaml | egrep -A28 -i 'config:|platform:|kubevirt:|rootVolume|storageClass|accessModes|volumeMode|compute:|cores:|memory:|kubevirt-vm-jsonpatch' || true
+          echo "To recreate with the desired template-backed OpenShift 4.21 settings, rerun with HCP_RECREATE=true."
+          exit 0
+        fi
+
+        echo "Applying template-backed HostedCluster/NodePool manifest: $manifest"
+        oc --kubeconfig {{ site_b_kubeconfig_file }} apply -f "$manifest"
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Show hosted cluster status on Site-B
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster,nodepool
+        echo
+        echo "# HostedCluster template summary"
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster {{ site_b_hcp_cluster_name }} -o yaml | egrep -A18 -i 'channel:|release:|etcd:|storageClass|storageDriver|baseDomainPassthrough|infraStorageClass|guestStorageClass' || true
+        echo
+        echo "# NodePool template summary"
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get nodepool {{ site_b_hcp_cluster_name }} -o yaml | egrep -A28 -i 'config:|platform:|kubevirt:|rootVolume|storageClass|accessModes|volumeMode|compute:|cores:|memory:|kubevirt-vm-jsonpatch' || true
+        echo
+        echo "# Hosting namespace PVCs"
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get pvc || true
+        echo
+        echo "# Control plane namespace pods/PVCs"
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n clusters-{{ site_b_hcp_cluster_name }} get pods,pvc || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: hcp_status
+
+    - name: Print hosted cluster status
+      ansible.builtin.debug:
+        var: hcp_status.stdout_lines

@@ -1,0 +1,10 @@
+apiVersion: operator.open-cluster-management.io/v1
+kind: MultiClusterHub
+metadata:
+  name: {{ acm_multiclusterhub_name }}
+  namespace: {{ acm_namespace }}
+spec:
+  availabilityConfig: {{ acm_availability_config }}
+{% if acm_disable_hub_self_management is defined %}
+  disableHubSelfManagement: {{ acm_disable_hub_self_management | lower }}
+{% endif %}

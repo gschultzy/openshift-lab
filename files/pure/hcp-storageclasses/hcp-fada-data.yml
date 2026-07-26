@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+ name: hcp-fada-data
+parameters:
+ backend: "pure_block"
+ priority_io: "high"     # this is for labeling purposes only to allow the FADA volume to be seen with IO_PRIORITY of HIGH
+ #allow_others: true     # uncomment this line if you need the mount path to have 777 permissions.
+provisioner: pxd.portworx.com
+volumeBindingMode: WaitForFirstConsumer
+#volumeBindingMode: Immediate # OPTIONAL if volume not getting created with VM
+allowVolumeExpansion: true

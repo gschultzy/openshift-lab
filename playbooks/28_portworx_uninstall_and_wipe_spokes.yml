@@ -1,0 +1,130 @@
+---
+- name: UninstallAndWipe Portworx from Site-A and Site-B spokes
+  hosts: localhost
+  gather_facts: false
+  vars:
+    portworx_wipe_sites:
+      - name: Site-A
+        cluster_name: "{{ bm_cluster_name }}"
+        kubeconfig_file: "{{ site_a_kubeconfig_file }}"
+      - name: Site-B
+        cluster_name: "{{ site_b_cluster_name }}"
+        kubeconfig_file: "{{ site_b_kubeconfig_file }}"
+  tasks:
+    - name: Confirm destructive Portworx wipe was explicitly approved
+      ansible.builtin.fail:
+        msg: |
+          Refusing to wipe Portworx without explicit confirmation.
+
+          This will set StorageCluster deleteStrategy.type=UninstallAndWipe and ignoreVolumes=true.
+          It permanently removes Portworx metadata/data from the selected spokes.
+
+          Re-run with:
+            CONFIRM_PORTWORX_WIPE=true ./scripts/portworx-uninstall-and-wipe-spokes.sh
+      when: lookup('env', 'CONFIRM_PORTWORX_WIPE') != 'true'
+
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Disable RHACM Portworx StorageCluster policy so it does not immediately recreate Portworx
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ portworx_pure_policy_namespace }} patch policy portworx-flasharray-storagecluster --type=merge -p '{"spec":{"disabled":true}}' 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Ensure spoke kubeconfig output directories exist
+      ansible.builtin.file:
+        path: "{{ item.kubeconfig_file | dirname }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ portworx_wipe_sites }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Extract spoke admin kubeconfigs from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ item.cluster_name }} get secret {{ item.cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ item.kubeconfig_file }}
+        chmod 0600 {{ item.kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+      loop: "{{ portworx_wipe_sites }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Apply UninstallAndWipe delete strategy and delete StorageCluster on each spoke
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K="{{ item.kubeconfig_file }}"
+        NS="{{ portworx_namespace }}"
+        STC="{{ portworx_storagecluster_name }}"
+
+        echo "# {{ item.name }} Portworx StorageCluster before wipe"
+        oc --kubeconfig "$K" -n "$NS" get storagecluster "$STC" -o wide 2>/dev/null || {
+          echo "No StorageCluster $NS/$STC on {{ item.name }}"
+          exit 0
+        }
+
+        echo
+        echo "# Setting deleteStrategy.type=UninstallAndWipe and ignoreVolumes=true"
+        oc --kubeconfig "$K" -n "$NS" patch storagecluster "$STC" --type=merge \
+          -p '{"spec":{"deleteStrategy":{"type":"UninstallAndWipe","ignoreVolumes":true}}}'
+
+        echo
+        echo "# Deleting StorageCluster $NS/$STC"
+        oc --kubeconfig "$K" -n "$NS" delete storagecluster "$STC" --wait=false || true
+
+        echo
+        echo "# Waiting for Portworx pods to disappear"
+        for i in $(seq 1 90); do
+          pods=$(oc --kubeconfig "$K" -n "$NS" get pods --no-headers 2>/dev/null | egrep -i 'portworx|stork|px|lighthouse' || true)
+          stc=$(oc --kubeconfig "$K" -n "$NS" get storagecluster "$STC" --no-headers 2>/dev/null || true)
+          if [ -z "$pods" ] && [ -z "$stc" ]; then
+            echo "Portworx StorageCluster/pods removed from {{ item.name }}"
+            break
+          fi
+          if [ $((i % 6)) -eq 0 ]; then
+            echo "Still waiting on {{ item.name }}: attempt $i/90"
+            [ -n "$stc" ] && echo "$stc"
+            [ -n "$pods" ] && echo "$pods"
+          fi
+          sleep 10
+        done
+
+        echo
+        echo "# Remove HCP StorageClasses left behind by the old deployment"
+        oc --kubeconfig "$K" delete sc \
+          {{ portworx_vmstate_storage_class | default('vmstate') }} \
+          hcp-fada-data \
+          {{ portworx_hcp_root_volume_storage_class | default('hcp-pxe-boot') }} \
+          {{ portworx_hcp_passthrough_infra_storage_class | default('hcp-pxe-data') }} \
+          {{ portworx_hcp_etcd_storage_class | default('hcp-pxe-etcd-pxfast') }} \
+          --ignore-not-found || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+      loop: "{{ portworx_wipe_sites }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: portworx_wipe_results
+
+    - name: Print wipe output
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ portworx_wipe_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

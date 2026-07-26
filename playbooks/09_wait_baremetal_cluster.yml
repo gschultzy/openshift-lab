@@ -1,0 +1,45 @@
+---
+- name: Wait for ACM bare-metal cluster installation to complete
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Show BMH state
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} get bmh -o wide"
+      changed_when: false
+      register: bmh_state
+      failed_when: false
+
+    - name: Print BMH state
+      ansible.builtin.debug:
+        var: bmh_state.stdout_lines
+
+    - name: Show Agent state
+      ansible.builtin.command: "oc -n {{ bm_cluster_name }} get agents -o wide"
+      changed_when: false
+      register: agent_state
+      failed_when: false
+
+    - name: Print Agent state
+      ansible.builtin.debug:
+        var: agent_state.stdout_lines
+
+    - name: Wait for AgentClusterInstall Completed=True
+      ansible.builtin.command: >-
+        oc -n {{ bm_cluster_name }} get agentclusterinstall {{ bm_cluster_name }}
+        -o jsonpath='{.status.conditions[?(@.type=="Completed")].status}'
+      register: aci_completed
+      changed_when: false
+      retries: 240
+      delay: 60
+      until: aci_completed.stdout == 'True'
+
+    - name: Show managed cluster status
+      ansible.builtin.command: "oc get managedcluster {{ bm_cluster_name }}"
+      changed_when: false
+      register: mc_state
+
+    - name: Print managed cluster status
+      ansible.builtin.debug:
+        var: mc_state.stdout_lines

@@ -1,0 +1,57 @@
+---
+- name: Preflight checks for Dell iDRAC / Redfish before ACM bare-metal provisioning
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+    - name: Validate bare-metal node MAC placeholders are replaced
+      ansible.builtin.assert:
+        that:
+          - item.boot_mac is not search('CHANGE_ME')
+        fail_msg: "{{ item.name }} still has a placeholder boot_mac. Set the real NIC MAC cabled to VLAN 3522."
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Query iDRAC Manager firmware version
+      ansible.builtin.uri:
+        url: "https://{{ item.bmc_ip }}/redfish/v1/Managers/iDRAC.Embedded.1"
+        method: GET
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+        status_code: 200
+      register: idrac_manager_results
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Show iDRAC firmware versions discovered
+      ansible.builtin.debug:
+        msg: "{{ item.item.name }} / {{ item.item.bmc_ip }} firmware={{ item.json.FirmwareVersion | default('UNKNOWN') }}"
+      loop: "{{ idrac_manager_results.results }}"
+      when: item.skipped is not defined
+
+    - name: Enforce expected iDRAC firmware version
+      ansible.builtin.assert:
+        that:
+          - item.json.FirmwareVersion == item.item.idrac_firmware_expected
+        fail_msg: >-
+          {{ item.item.name }} is running iDRAC {{ item.json.FirmwareVersion | default('UNKNOWN') }} but expected
+          {{ item.item.idrac_firmware_expected }}. Make all iDRAC versions match before bare-metal automation.
+      loop: "{{ idrac_manager_results.results }}"
+      when:
+        - idrac_enforce_same_firmware | bool
+        - item.skipped is not defined
+
+    - name: Validate Redfish System path used by BareMetalHost bmc.address
+      ansible.builtin.uri:
+        url: "https://{{ item.bmc_ip }}{{ idrac_redfish_system_path }}"
+        method: GET
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+        status_code: 200
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)

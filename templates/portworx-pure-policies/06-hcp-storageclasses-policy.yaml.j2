@@ -1,0 +1,125 @@
+{% if portworx_pure_apply_hcp_storageclasses | default(true) | bool %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: portworx-hcp-storageclasses
+  namespace: {{ portworx_pure_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Portworx Pure FlashArray
+    policy.open-cluster-management.io/categories: StorageClasses
+    policy.open-cluster-management.io/controls: HCP and OpenShift Virtualization storage layout
+spec:
+  remediationAction: {{ portworx_pure_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: portworx-hcp-storageclasses
+        spec:
+          remediationAction: {{ portworx_pure_policy_remediation_action }}
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: {{ portworx_vmstate_storage_class | default('vmstate') }}
+                parameters:
+                  repl: "3"
+                  sharedv4: "true"
+                  sharedv4_svc_type: ClusterIP
+                provisioner: pxd.portworx.com
+                reclaimPolicy: Retain
+                volumeBindingMode: Immediate
+                allowVolumeExpansion: true
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: hcp-fada-data
+                parameters:
+                  backend: pure_block
+                  priority_io: high
+                provisioner: pxd.portworx.com
+                volumeBindingMode: WaitForFirstConsumer
+                allowVolumeExpansion: true
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: {{ portworx_hcp_root_volume_storage_class | default('hcp-pxe-boot') }}
+                  annotations:
+                    storageclass.kubernetes.io/is-default-class: {{ (portworx_hcp_boot_storage_class_is_default | default(true) | bool) | string | lower | to_json }}
+                    storageclass.kubevirt.io/is-default-virt-class: {{ (portworx_hcp_boot_storage_class_is_default | default(true) | bool) | string | lower | to_json }}
+                provisioner: pxd.portworx.com
+                parameters:
+                  priority_io: high
+                  repl: "2"
+                  nodiscard: "true"
+                volumeBindingMode: Immediate
+                allowVolumeExpansion: true
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: {{ portworx_hcp_passthrough_infra_storage_class | default('hcp-pxe-data') }}
+                provisioner: pxd.portworx.com
+                parameters:
+                  priority_io: high
+                  repl: "2"
+                  nodiscard: "true"
+                volumeBindingMode: Immediate
+                allowVolumeExpansion: true
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: storage.k8s.io/v1
+                kind: StorageClass
+                metadata:
+                  name: {{ portworx_hcp_etcd_storage_class | default('hcp-pxe-etcd-pxfast') }}
+                provisioner: pxd.portworx.com
+                parameters:
+                  priority_io: high
+                  repl: "1"
+                  fastpath: "true"
+                volumeBindingMode: Immediate
+                allowVolumeExpansion: true
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cdi.kubevirt.io/v1beta1
+                kind: StorageProfile
+                metadata:
+                  name: {{ portworx_hcp_root_volume_storage_class | default('hcp-pxe-boot') }}
+                spec:
+                  claimPropertySets:
+                    - accessModes:
+                        - ReadWriteMany
+                      volumeMode: Block
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cdi.kubevirt.io/v1beta1
+                kind: StorageProfile
+                metadata:
+                  name: {{ portworx_hcp_passthrough_infra_storage_class | default('hcp-pxe-data') }}
+                spec:
+                  claimPropertySets:
+                    - accessModes:
+                        - ReadWriteMany
+                      volumeMode: Block
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cdi.kubevirt.io/v1beta1
+                kind: StorageProfile
+                metadata:
+                  name: {{ portworx_vmstate_storage_class | default('vmstate') }}
+                spec:
+                  claimPropertySets:
+                    - accessModes:
+                        - ReadWriteMany
+                      volumeMode: Filesystem
+{% endif %}

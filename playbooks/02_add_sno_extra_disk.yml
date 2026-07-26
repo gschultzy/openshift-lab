@@ -1,0 +1,48 @@
+---
+- name: Add optional second disk to existing SNO VM
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+    - name: Show extra disk plan
+      ansible.builtin.debug:
+        msg:
+          - "VM: {{ sno_vm_name }}"
+          - "Datastore: {{ vsphere_datastore }}"
+          - "Extra disk enabled: {{ sno_vm_extra_disk_enabled | default(false) | bool }}"
+          - "Extra disk size: {{ sno_vm_extra_disk_gb | default(800) }}GB"
+          - "Extra disk type: {{ sno_vm_extra_disk_type | default('thin') }}"
+          - "This only attaches the VMDK. It does not format or mount it inside RHCOS/OpenShift."
+
+    - name: Add second data disk to SNO VM
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/add-vm-disk.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+          - --datacenter
+          - "{{ vsphere_datacenter }}"
+          - --vm
+          - "{{ sno_vm_name }}"
+          - --datastore
+          - "{{ vsphere_datastore }}"
+          - --size-gb
+          - "{{ sno_vm_extra_disk_gb | default(800) }}"
+          - --skip-if-size-exists
+          - --grow-existing-extra
+          - --insecure
+          - --thin
+      register: add_disk_result
+      changed_when: "('Added ' in add_disk_result.stdout) or ('Resized ' in add_disk_result.stdout)"
+      no_log: "{{ vcenter_no_log | default(false) | bool }}"
+      when: sno_vm_extra_disk_enabled | default(false) | bool
+
+    - name: Show add disk result
+      ansible.builtin.debug:
+        msg:
+          - "stdout: {{ add_disk_result.stdout_lines | default([]) }}"
+          - "stderr: {{ add_disk_result.stderr_lines | default([]) }}"
+      when: add_disk_result is defined

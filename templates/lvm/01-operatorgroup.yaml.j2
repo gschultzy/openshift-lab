@@ -1,0 +1,8 @@
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: {{ lvm_operatorgroup_name }}
+  namespace: {{ lvm_namespace }}
+spec:
+  targetNamespaces:
+    - {{ lvm_namespace }}

@@ -1,0 +1,78 @@
+{% if portworx_pure_apply_storagecluster | default(true) | bool %}
+{% set _pure_pod_suffix = '' %}
+{% if pure_flasharray_pod | default('') | length > 0 %}
+{% set _pure_pod_suffix = ',pod=' ~ pure_flasharray_pod %}
+{% endif %}
+{% set _device_spec = portworx_cloud_drive_spec | default('size=' ~ portworx_cloud_drive_size_gb ~ _pure_pod_suffix) %}
+{% set _journal_spec = portworx_journal_device_spec | default('size=' ~ portworx_journal_device_size_gb ~ _pure_pod_suffix) %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: portworx-flasharray-storagecluster
+  namespace: {{ portworx_pure_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Portworx Pure FlashArray
+    policy.open-cluster-management.io/categories: StorageCluster
+    policy.open-cluster-management.io/controls: Portworx Enterprise with FlashArray cloud drives
+spec:
+  remediationAction: {{ portworx_pure_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: portworx-flasharray-storagecluster
+        spec:
+          remediationAction: {{ portworx_pure_policy_remediation_action }}
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: core.libopenstorage.org/v1
+                kind: StorageCluster
+                metadata:
+                  name: {{ portworx_storagecluster_name }}
+                  namespace: {{ portworx_namespace }}
+                  annotations:
+                    portworx.io/install-source: {{ portworx_install_source | to_json }}
+                    portworx.io/is-openshift: "true"
+                    portworx.io/misc-args: {{ portworx_misc_args | to_json }}
+                    portworx.io/preflight-check: "true"
+                spec:
+                  image: {{ portworx_image | to_json }}
+                  imagePullPolicy: Always
+                  kvdb:
+                    internal: true
+                    enableTLS: {{ portworx_kvdb_enable_tls | default(true) | bool | lower }}
+                  # Normalized from the Portworx KDS template. The downloaded template
+                  # contained two cloudStorage keys; keep provider, deviceSpecs and
+                  # journalDeviceSpec under one key so the rendered YAML is deterministic.
+                  cloudStorage:
+                    provider: pure
+                    deviceSpecs:
+                      - {{ _device_spec | to_json }}
+                    journalDeviceSpec: {{ _journal_spec | to_json }}
+                  secretsProvider: k8s
+                  startPort: {{ portworx_start_port }}
+                  stork:
+                    enabled: {{ portworx_enable_stork | bool | lower }}
+                    args:
+                      webhook-controller: "true"
+                  runtimeOptions:
+                    default-io-profile: {{ portworx_default_io_profile | string | to_json }}
+                  csi:
+                    enabled: {{ portworx_enable_csi | bool | lower }}
+                  monitoring:
+                    telemetry:
+                      enabled: {{ portworx_enable_telemetry | bool | lower }}
+                    prometheus:
+                      exportMetrics: {{ portworx_prometheus_export_metrics | bool | lower }}
+                  certManager:
+                    enabled: {{ portworx_cert_manager_enabled | default(true) | bool | lower }}
+                  kubeDatastore:
+                    enableDynamicPools: {{ portworx_kube_datastore_enabled | default(true) | bool | lower }}
+                  env:
+                    - name: PURE_FLASHARRAY_SAN_TYPE
+                      value: {{ portworx_pure_san_type | to_json }}
+{% endif %}

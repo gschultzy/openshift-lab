@@ -1,0 +1,162 @@
+---
+- name: Configure Assisted Service storage on the ACM hub
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: End play when Assisted Service config is disabled
+      ansible.builtin.meta: end_play
+      when: not assisted_service_configure | bool
+
+    - name: Wait for configured Assisted Service StorageClass when set
+      ansible.builtin.command: "oc get storageclass {{ assisted_service_storage_class }}"
+      register: assisted_storage_class
+      changed_when: false
+      retries: 40
+      delay: 15
+      until: assisted_storage_class.rc == 0
+      when: assisted_service_storage_class | length > 0
+
+    - name: Wait for AgentServiceConfig CRD
+      ansible.builtin.command: oc get crd agentserviceconfigs.agent-install.openshift.io
+      register: asc_crd
+      changed_when: false
+      retries: 80
+      delay: 15
+      until: asc_crd.rc == 0
+
+    - name: Render AgentServiceConfig
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/acm/04-agentserviceconfig.yaml.j2"
+        dest: "{{ acm_rendered_dir }}/04-agentserviceconfig.yaml"
+        mode: '0600'
+
+    - name: Apply AgentServiceConfig
+      ansible.builtin.command: "oc apply -f {{ acm_rendered_dir }}/04-agentserviceconfig.yaml"
+      register: agentserviceconfig_apply
+      changed_when: >-
+        'created' in agentserviceconfig_apply.stdout or
+        'configured' in agentserviceconfig_apply.stdout
+
+    - name: Show AgentServiceConfig apply result
+      ansible.builtin.debug:
+        var: agentserviceconfig_apply.stdout_lines
+
+    - name: Wait for assisted-service deployment namespace
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get deploy -A -o jsonpath='{range .items[?(@.metadata.name=="assisted-service")]}{.metadata.namespace}{"\n"}{end}' | head -n1
+      args:
+        executable: /bin/bash
+      register: assisted_service_namespace
+      changed_when: false
+      retries: 40
+      delay: 15
+      until: assisted_service_namespace.stdout | trim | length > 0
+
+    - name: Save assisted-service namespace
+      ansible.builtin.set_fact:
+        assisted_service_ns: "{{ assisted_service_namespace.stdout | trim }}"
+
+    - name: Show assisted-service namespace
+      ansible.builtin.debug:
+        msg: "assisted-service deployment namespace is {{ assisted_service_ns }}"
+
+    - name: Wait for assisted-service related PVCs to bind
+      ansible.builtin.shell: |
+        set -o pipefail
+        bad=""
+        while read -r name phase; do
+          [ -z "$name" ] && continue
+          case "$name" in
+            *assisted*|*postgres*|*database*|*image*|*filesystem*)
+              if [ "$phase" != "Bound" ]; then
+                bad="$bad$name=$phase "
+              fi
+              ;;
+          esac
+        done < <(oc -n {{ assisted_service_ns }} get pvc -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null || true)
+        if [ -n "$bad" ]; then
+          echo "PVCs not bound yet: $bad"
+          oc -n {{ assisted_service_ns }} get pvc -o wide || true
+          exit 1
+        fi
+        oc -n {{ assisted_service_ns }} get pvc -o wide || true
+      args:
+        executable: /bin/bash
+      register: assisted_pvcs_bound
+      changed_when: false
+      retries: 40
+      delay: 15
+      until: assisted_pvcs_bound.rc == 0
+
+    - name: Wait for assisted-service deployment to have available replicas
+      ansible.builtin.shell: |
+        set -o pipefail
+        desired=$(oc -n {{ assisted_service_ns }} get deploy assisted-service -o jsonpath='{.spec.replicas}')
+        available=$(oc -n {{ assisted_service_ns }} get deploy assisted-service -o jsonpath='{.status.availableReplicas}')
+        desired=${desired:-1}
+        available=${available:-0}
+        echo "assisted-service desired=$desired available=$available"
+        if [ "$available" -ge "$desired" ]; then
+          exit 0
+        fi
+        oc -n {{ assisted_service_ns }} get deploy assisted-service -o wide || true
+        oc -n {{ assisted_service_ns }} get pods -o wide | egrep -i 'assisted|postgres|image|NAME' || true
+        exit 1
+      args:
+        executable: /bin/bash
+      register: assisted_rollout
+      changed_when: false
+      retries: 40
+      delay: 30
+      until: assisted_rollout.rc == 0
+      ignore_errors: true
+
+    - name: Collect assisted-service diagnostics when unavailable
+      ansible.builtin.shell: |
+        set +e
+        echo "# AgentServiceConfig"
+        oc get agentserviceconfig agent -o yaml
+        echo
+        echo "# Deployments"
+        oc -n {{ assisted_service_ns }} get deploy -o wide | egrep -i 'assisted|postgres|image|NAME'
+        echo
+        echo "# Pods"
+        oc -n {{ assisted_service_ns }} get pods -o wide | egrep -i 'assisted|postgres|image|NAME'
+        echo
+        echo "# PVCs"
+        oc -n {{ assisted_service_ns }} get pvc -o wide
+        echo
+        echo "# assisted-service deployment describe"
+        oc -n {{ assisted_service_ns }} describe deploy assisted-service
+        echo
+        echo "# Recent events"
+        oc -n {{ assisted_service_ns }} get events --sort-by=.lastTimestamp | tail -80
+        echo
+        echo "# assisted-service pod logs"
+        pod=$(oc -n {{ assisted_service_ns }} get pods -o name | grep assisted-service | head -n1)
+        if [ -n "$pod" ]; then
+          oc -n {{ assisted_service_ns }} logs "$pod" --all-containers --tail=120
+        else
+          echo "No assisted-service pod found"
+        fi
+      args:
+        executable: /bin/bash
+      register: assisted_service_diagnostics
+      changed_when: false
+      when: assisted_rollout.rc != 0
+
+    - name: Show assisted-service diagnostics
+      ansible.builtin.debug:
+        var: assisted_service_diagnostics.stdout_lines
+      when: assisted_rollout.rc != 0
+
+    - name: Fail when assisted-service deployment is unavailable
+      ansible.builtin.fail:
+        msg: >-
+          assisted-service is not available in namespace {{ assisted_service_ns }}.
+          Check the diagnostics above. The most common causes are unbound PVCs,
+          image pull/network/proxy issues, or a crashing assisted-service pod.
+      when: assisted_rollout.rc != 0

@@ -1,0 +1,133 @@
+---
+- name: Fix Site-A RHACM policy placement for HCP prerequisite policies
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Export KUBECONFIG or complete the hub install first."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure Site-A policy namespace exists
+      ansible.builtin.command: oc create namespace {{ site_a_policy_namespace }} --dry-run=client -o yaml
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: false
+      register: site_a_policy_namespace_manifest
+
+    - name: Apply Site-A policy namespace
+      ansible.builtin.command: oc apply -f -
+      args:
+        stdin: "{{ site_a_policy_namespace_manifest.stdout }}"
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Ensure Site-A ManagedClusterSet exists
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat <<'YAML' | oc apply -f -
+        apiVersion: cluster.open-cluster-management.io/v1beta2
+        kind: ManagedClusterSet
+        metadata:
+          name: {{ bm_clusterset }}
+        YAML
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Label Site-A ManagedCluster for ClusterSet and policy selector
+      ansible.builtin.command: >-
+        oc label managedcluster {{ bm_cluster_name }}
+        cluster.open-cluster-management.io/clusterset={{ bm_clusterset }}
+        {{ site_a_policy_cluster_label_key }}={{ site_a_policy_cluster_label_value }}
+        --overwrite
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Ensure ManagedClusterSetBinding exists in policy namespace
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat <<'YAML' | oc apply -f -
+        apiVersion: cluster.open-cluster-management.io/v1beta2
+        kind: ManagedClusterSetBinding
+        metadata:
+          name: {{ bm_clusterset }}
+          namespace: {{ site_a_policy_namespace }}
+        spec:
+          clusterSet: {{ bm_clusterset }}
+        YAML
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Patch placement to tolerate Site-A unreachable/unavailable NoSelect taints
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_a_policy_namespace }} patch placement {{ site_a_policy_placement_name }} --type=merge -p '{
+          "spec": {
+            "tolerations": [
+              {"key":"cluster.open-cluster-management.io/unreachable","operator":"Exists","effect":"NoSelect"},
+              {"key":"cluster.open-cluster-management.io/unavailable","operator":"Exists","effect":"NoSelect"}
+            ]
+          }
+        }'
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Show Site-A ManagedCluster labels and taints
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# ManagedCluster labels'
+        oc get managedcluster {{ bm_cluster_name }} --show-labels
+        echo
+        echo '# ManagedCluster taints'
+        oc get managedcluster {{ bm_cluster_name }} -o jsonpath='{range .spec.taints[*]}{.key}{"\t"}{.effect}{"\t"}{.value}{"\n"}{end}' || true
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: false
+      register: site_a_managedcluster_status
+
+    - name: Print Site-A ManagedCluster labels and taints
+      ansible.builtin.debug:
+        var: site_a_managedcluster_status.stdout_lines
+
+    - name: Wait for placement to select Site-A
+      ansible.builtin.command: oc -n {{ site_a_policy_namespace }} get placementdecision -o jsonpath='{range .items[*].status.decisions[*]}{.clusterName}{"\n"}{end}'
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      register: site_a_placement_decisions
+      changed_when: false
+      retries: 20
+      delay: 6
+      until: bm_cluster_name in site_a_placement_decisions.stdout_lines
+
+    - name: Show final placement and policies
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_a_policy_namespace }} get managedclustersetbinding,placement,placementdecision,policy
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: false
+      register: site_a_policy_placement_final
+
+    - name: Print final placement and policies
+      ansible.builtin.debug:
+        var: site_a_policy_placement_final.stdout_lines

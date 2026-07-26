@@ -1,0 +1,142 @@
+---
+- name: Ensure HyperShift operator and CRDs exist on Site-A and Site-B
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Skip direct HyperShift bootstrap when disabled
+      ansible.builtin.debug:
+        msg: "Direct HyperShift bootstrap is disabled; relying only on RHACM hypershift-addon."
+      when: not (hcp_direct_hypershift_install | default(true) | bool)
+
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+      when: hcp_direct_hypershift_install | default(true) | bool
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when:
+        - hcp_direct_hypershift_install | default(true) | bool
+        - not hub_kubeconfig_stat.stat.exists
+
+    - name: Extract spoke kubeconfigs from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mkdir -p {{ site_a_kubeconfig_file | dirname }} {{ site_b_kubeconfig_file | dirname }}
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+      when: hcp_direct_hypershift_install | default(true) | bool
+
+    - name: Install hcp CLI for direct HyperShift bootstrap if needed
+      ansible.builtin.command: >-
+        {{ repo_root }}/scripts/install-hcp-cli-from-cluster.sh
+        {{ hub_kubeconfig }}
+        {{ site_a_hcp_cli_path }}
+        {{ site_a_kubeconfig_file }}
+        {{ site_b_kubeconfig_file }}
+      changed_when: true
+      when: hcp_direct_hypershift_install | default(true) | bool
+
+    - name: Ensure HyperShift operator is usable on each spoke
+      ansible.builtin.shell: |
+        set -euo pipefail
+        label="{{ item.name }}"
+        K="{{ item.kubeconfig_file }}"
+        HCP="{{ item.hcp_cli_path }}"
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
+
+        echo "# ${label}: ensure add-on and HyperShift namespaces exist"
+        oc --kubeconfig "$K" create namespace open-cluster-management-agent-addon-discovery --dry-run=client -o yaml | oc --kubeconfig "$K" apply -f -
+        oc --kubeconfig "$K" create namespace hypershift --dry-run=client -o yaml | oc --kubeconfig "$K" apply -f -
+
+        check_hypershift_ready() {
+          oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io >/dev/null 2>&1 && \
+          oc --kubeconfig "$K" -n hypershift get deployment/operator >/dev/null 2>&1 && \
+          oc --kubeconfig "$K" -n hypershift rollout status deployment/operator --timeout=20s >/dev/null 2>&1
+        }
+
+        echo "# ${label}: current HyperShift status"
+        oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io 2>/dev/null || true
+        oc --kubeconfig "$K" -n hypershift get deployment,pods 2>/dev/null || true
+
+        if check_hypershift_ready; then
+          echo "${label}: HyperShift operator and CRDs are already usable."
+          exit 0
+        fi
+
+        echo "${label}: RHACM hypershift-addon has not produced usable CRDs/operator yet; bootstrapping HyperShift directly with hcp install render."
+
+        render="${tmpdir}/hypershift-install.yaml"
+        rendered=false
+
+        try_render() {
+          local description="$1"
+          shift
+          echo "# ${label}: trying ${description}"
+          if KUBECONFIG="$K" "$HCP" "$@" > "$render" 2>"${tmpdir}/render.err"; then
+            if [ -s "$render" ] && grep -Eq '^(apiVersion|kind):' "$render"; then
+              rendered=true
+              return 0
+            fi
+          fi
+          cat "${tmpdir}/render.err" >&2 || true
+          return 1
+        }
+
+        try_render "hcp install render --format=yaml" install render --format=yaml || \
+        try_render "hcp install render --namespace hypershift --format=yaml" install render --namespace hypershift --format=yaml || \
+        try_render "hcp install render --hypershift-namespace hypershift --format=yaml" install render --hypershift-namespace hypershift --format=yaml || true
+
+        if [ "$rendered" != "true" ]; then
+          echo "ERROR: Could not render HyperShift install manifests with ${HCP}." >&2
+          echo "Run '${HCP} install render --help' on the bastion to confirm the supported flags." >&2
+          exit 1
+        fi
+
+        echo "# ${label}: applying rendered HyperShift install manifests"
+        oc --kubeconfig "$K" apply -f "$render"
+
+        echo "# ${label}: wait for HyperShift CRDs"
+        for i in $(seq 1 60); do
+          if oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io >/dev/null 2>&1; then
+            break
+          fi
+          echo "Waiting for HyperShift CRDs on ${label}: ${i}/60"
+          sleep 10
+        done
+
+        echo "# ${label}: wait for HyperShift operator rollout"
+        oc --kubeconfig "$K" -n hypershift rollout status deployment/operator --timeout=20m
+
+        echo "# ${label}: final HyperShift status"
+        oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io
+        oc --kubeconfig "$K" -n hypershift get deployment,pods
+      args:
+        executable: /bin/bash
+      loop:
+        - name: Site-A
+          kubeconfig_file: "{{ site_a_kubeconfig_file }}"
+          hcp_cli_path: "{{ site_a_hcp_cli_path }}"
+        - name: Site-B
+          kubeconfig_file: "{{ site_b_kubeconfig_file }}"
+          hcp_cli_path: "{{ site_b_hcp_cli_path }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hypershift_operator_bootstrap
+      changed_when: "'bootstrapping HyperShift directly' in hypershift_operator_bootstrap.stdout"
+      when: hcp_direct_hypershift_install | default(true) | bool
+
+    - name: Print HyperShift bootstrap output
+      ansible.builtin.debug:
+        var: hypershift_operator_bootstrap.results
+      when: hcp_direct_hypershift_install | default(true) | bool

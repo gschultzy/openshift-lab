@@ -1,0 +1,171 @@
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ hcp_machine_config_name }}
+  namespace: {{ hcp_namespace }}
+data:
+  config: |
+    apiVersion: machineconfiguration.openshift.io/v1
+    kind: MachineConfig
+    metadata:
+      labels:
+        machineconfiguration.openshift.io/role: worker
+      name: {{ hcp_machine_config_name }}
+    spec:
+      config:
+        ignition:
+          config: {}
+          security:
+            tls: {}
+          timeouts: {}
+          version: 2.2.0
+        networkd: {}
+        passwd: {}
+        storage:
+          files:
+          - contents:
+              source: data:text/plain;charset=utf-8;base64,QUNUSU9OPT0iYWRkfGNoYW5nZSIsIFNVQlNZU1RFTT09ImJsb2NrIiwgS0VSTkVMPT0ic2RbYS16XSIsICBBVFRSe3F1ZXVlL3JvdGF0aW9uYWx9PSIwIgpBQ1RJT049PSJhZGR8Y2hhbmdlIiwgU1VCU1lTVEVNPT0iYmxvY2siLCBLRVJORUw9PSJ2ZFthLXpdIiwgIEFUVFJ7cXVldWUvcm90YXRpb25hbH09IjAiCg==
+              verification: {}
+            filesystem: root
+            mode: 420
+            path: /etc/udev/rules.d/99-px-non-rotational.rules
+      osImageURL: ""
+---
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  name: {{ hcp_cluster_name }}
+  namespace: {{ hcp_namespace }}
+spec:
+  channel: {{ hcp_channel }}
+  etcd:
+    managed:
+      storage:
+        persistentVolume:
+          size: {{ hcp_etcd_volume_size }}
+          storageClassName: {{ hcp_etcd_storage_class }}
+        type: PersistentVolume
+    managementType: Managed
+  release:
+    image: {{ hcp_release_image }}
+  pullSecret:
+    name: {{ hcp_pull_secret_name }}
+  sshKey:
+    name: {{ hcp_ssh_key_name }}
+  networking:
+    clusterNetwork:
+    - cidr: {{ hcp_cluster_cidr }}
+    serviceNetwork:
+    - cidr: {{ hcp_service_cidr }}
+    networkType: OVNKubernetes
+  controllerAvailabilityPolicy: HighlyAvailable
+  infrastructureAvailabilityPolicy: HighlyAvailable
+  platform:
+    type: KubeVirt
+    kubevirt:
+      baseDomainPassthrough: true
+      storageDriver:
+        type: Manual
+        manual:
+          storageClassMapping:
+          - infraStorageClassName: {{ hcp_passthrough_infra_storage_class }}
+            guestStorageClassName: {{ hcp_passthrough_guest_storage_class }}
+{% if hcp_tenant_px_storage_class != hcp_passthrough_infra_storage_class %}
+          - infraStorageClassName: {{ hcp_tenant_px_storage_class }}
+            guestStorageClassName: {{ hcp_tenant_px_storage_class }}
+{% endif %}
+          volumeSnapshotClassMapping:
+          - infraVolumeSnapshotClassName: {{ hcp_snapshot_class }}
+            guestVolumeSnapshotClassName: {{ hcp_snapshot_class }}
+  infraID: {{ hcp_cluster_name }}
+  services:
+  - service: OAuthServer
+    servicePublishingStrategy:
+      type: Route
+  - service: OIDC
+    servicePublishingStrategy:
+      type: Route
+  - service: Konnectivity
+    servicePublishingStrategy:
+      type: Route
+  - service: Ignition
+    servicePublishingStrategy:
+      type: Route
+---
+apiVersion: hypershift.openshift.io/v1beta1
+kind: NodePool
+metadata:
+  name: {{ hcp_cluster_name }}
+  namespace: {{ hcp_namespace }}
+  annotations:
+    hypershift.openshift.io/kubevirt-vm-jsonpatch: |
+      [
+{% if hcp_enable_extra_disks | bool %}
+{% for disk in hcp_extra_disks %}
+        { "op": "add", "path": "/spec/dataVolumeTemplates/-", "value": {
+            "apiVersion": "cdi.kubevirt.io/v1beta1",
+            "kind": "DataVolume",
+            "metadata": { "name": "{{ disk.name }}" },
+            "spec": {
+              "storage": {
+                "storageClassName": "{{ disk.storageClass | default(hcp_extra_disk_storage_class) }}",
+                "resources": { "requests": { "storage": "{{ disk.size }}" } }
+              },
+              "source": { "blank": {} }
+            }
+        }},
+        { "op": "add", "path": "/spec/template/spec/volumes/-",
+          "value": { "name": "{{ disk.name }}", "dataVolume": { "name": "{{ disk.name }}" } }
+        },
+        { "op": "add", "path": "/spec/template/spec/domain/devices/disks/-",
+          "value": { "name": "{{ disk.name }}", "disk": { "bus": "virtio" } }
+        },
+{% endfor %}
+{% endif %}
+        { "op": "add", "path": "/spec/template/metadata/labels/{{ hcp_cluster_name }}", "value": "" },
+        { "op": "add", "path": "/spec/template/spec/affinity", "value":
+          {
+            "podAntiAffinity": {
+              "requiredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "labelSelector": {
+                    "matchExpressions": [
+                      { "key": "{{ hcp_cluster_name }}", "operator": "Exists" }
+                    ]
+                  },
+                  "topologyKey": "kubernetes.io/hostname"
+                }
+              ]
+            }
+          }
+        }
+      ]
+spec:
+  arch: amd64
+  clusterName: {{ hcp_cluster_name }}
+  replicas: {{ hcp_nodepool_replicas }}
+  config:
+  - name: {{ hcp_machine_config_name }}
+  management:
+    autoRepair: false
+    inPlace:
+      maxUnavailable: 1
+    upgradeType: InPlace
+  platform:
+    type: KubeVirt
+    kubevirt:
+      compute:
+        cores: {{ hcp_worker_cores }}
+        memory: {{ hcp_worker_memory }}
+      rootVolume:
+        type: Persistent
+        persistent:
+          size: {{ hcp_root_volume_size }}Gi
+          accessModes:
+          - {{ hcp_root_volume_access_modes }}
+          storageClass: {{ hcp_root_volume_storage_class }}
+          volumeMode: {{ hcp_root_volume_volume_mode }}
+      defaultPodNetwork: true
+  release:
+    image: {{ hcp_release_image }}

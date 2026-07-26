@@ -1,0 +1,171 @@
+---
+- name: Restart enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} bare-metal nodes through iDRAC Redfish
+  hosts: ansible_controller
+  gather_facts: false
+  vars:
+    idrac_reset_success_codes: [200, 202, 204]
+  tasks:
+    - name: Confirm enabled nodes that will be rebooted
+      ansible.builtin.debug:
+        msg: "Will restart {{ item.name }} via iDRAC {{ item.bmc_ip }}"
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Read current power state for enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} nodes
+      ansible.builtin.uri:
+        url: "https://{{ item.bmc_ip }}{{ idrac_redfish_system_path }}"
+        method: GET
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+        status_code:
+          - 200
+      no_log: "{{ idrac_power_action_no_log | default(false) | bool }}"
+      register: idrac_power_state_results
+      failed_when: false
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Show current power state for enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} nodes
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.name }} current PowerState={{ item.json.PowerState | default('unknown') }}
+          status={{ item.status | default('n/a') }}
+      loop: "{{ idrac_power_state_results.results | default([]) }}"
+      when:
+        - item.item.enabled | default(true)
+
+    - name: Try Redfish ForceRestart for enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} nodes
+      ansible.builtin.uri:
+        url: "https://{{ item.bmc_ip }}{{ idrac_redfish_system_path }}/Actions/ComputerSystem.Reset"
+        method: POST
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+        body_format: json
+        body:
+          ResetType: ForceRestart
+        status_code:
+          - 200
+          - 202
+          - 204
+          - 409
+      no_log: "{{ idrac_power_action_no_log | default(false) | bool }}"
+      register: idrac_force_restart_results
+      failed_when: false
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Show ForceRestart results
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.name }} ForceRestart HTTP status={{ item.status | default('n/a') }}.
+          {{ 'Success' if (item.status | default(0)) in idrac_reset_success_codes else 'Will use ForceOff/On fallback if possible' }}
+      loop: "{{ idrac_force_restart_results.results | default([]) }}"
+      when:
+        - item.item.enabled | default(true)
+
+    - name: ForceOff nodes where ForceRestart did not succeed
+      ansible.builtin.uri:
+        url: "https://{{ item.item.bmc_ip }}{{ idrac_redfish_system_path }}/Actions/ComputerSystem.Reset"
+        method: POST
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+        body_format: json
+        body:
+          ResetType: ForceOff
+        status_code:
+          - 200
+          - 202
+          - 204
+          - 409
+      no_log: "{{ idrac_power_action_no_log | default(false) | bool }}"
+      register: idrac_forceoff_results
+      failed_when: false
+      loop: "{{ idrac_force_restart_results.results | default([]) }}"
+      when:
+        - item.item.enabled | default(true)
+        - (item.status | default(0)) not in idrac_reset_success_codes
+
+    - name: Wait after ForceOff fallback
+      ansible.builtin.pause:
+        seconds: 15
+      when:
+        - idrac_forceoff_results is defined
+        - (idrac_forceoff_results.results | default([]) | length) > 0
+
+    - name: Power On nodes where ForceRestart did not succeed
+      ansible.builtin.uri:
+        url: "https://{{ item.item.bmc_ip }}{{ idrac_redfish_system_path }}/Actions/ComputerSystem.Reset"
+        method: POST
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+        body_format: json
+        body:
+          ResetType: On
+        status_code:
+          - 200
+          - 202
+          - 204
+          - 409
+      no_log: "{{ idrac_power_action_no_log | default(false) | bool }}"
+      register: idrac_on_results
+      failed_when: false
+      loop: "{{ idrac_force_restart_results.results | default([]) }}"
+      when:
+        - item.item.enabled | default(true)
+        - (item.status | default(0)) not in idrac_reset_success_codes
+
+    - name: Show fallback Power On results
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.item.name }} PowerOn fallback HTTP status={{ item.status | default('n/a') }}.
+          A 409 here usually means iDRAC is still busy with another power/control operation; wait a minute and rerun for that node.
+      loop: "{{ idrac_on_results.results | default([]) }}"
+      when:
+        - idrac_on_results is defined
+        - item.item is defined
+        - item.item.item is defined
+
+    - name: Read final power state for enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} nodes
+      ansible.builtin.uri:
+        url: "https://{{ item.bmc_ip }}{{ idrac_redfish_system_path }}"
+        method: GET
+        user: "{{ vault_idrac_username }}"
+        password: "{{ vault_idrac_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+        status_code:
+          - 200
+      no_log: "{{ idrac_power_action_no_log | default(false) | bool }}"
+      register: idrac_final_power_state_results
+      failed_when: false
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Show final power state for enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} nodes
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.name }} final PowerState={{ item.json.PowerState | default('unknown') }}
+          status={{ item.status | default('n/a') }}
+      loop: "{{ idrac_final_power_state_results.results | default([]) }}"
+      when:
+        - item.item.enabled | default(true)
+
+    - name: Show reboot command completed
+      ansible.builtin.debug:
+        msg: "Restart commands processed for enabled {{ bm_cluster_display_name | default(bm_cluster_name) }} nodes. Watch: oc -n {{ bm_cluster_name }} get bmh,agent -w"

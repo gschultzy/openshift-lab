@@ -1,0 +1,51 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ hcp_tenant_site_a_oauth_policy_name }}
+  namespace: {{ hcp_tenant_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: HCP tenant access
+    policy.open-cluster-management.io/categories: Authentication
+    policy.open-cluster-management.io/controls: Site-A HostedCluster HTPasswd OAuth
+spec:
+  remediationAction: {{ hcp_tenant_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ hcp_tenant_site_a_oauth_policy_name }}
+        spec:
+          remediationAction: {{ hcp_tenant_policy_remediation_action }}
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: {{ site_a_hcp_htpasswd_secret_name }}
+                  namespace: {{ site_a_hcp_namespace }}
+                type: Opaque
+                data:
+                  htpasswd: {{ hcp_tenant_htpasswd_file_b64 }}
+{% for tenant in hcp_tenants | selectattr('site', 'equalto', 'site-a') | list %}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: hypershift.openshift.io/v1beta1
+                kind: HostedCluster
+                metadata:
+                  name: {{ tenant.name }}
+                  namespace: {{ site_a_hcp_namespace }}
+                spec:
+                  configuration:
+                    oauth:
+                      identityProviders:
+                        - name: {{ hcp_tenant_htpasswd_idp_name }}
+                          mappingMethod: claim
+                          type: HTPasswd
+                          htpasswd:
+                            fileData:
+                              name: {{ site_a_hcp_htpasswd_secret_name }}
+{% endfor %}

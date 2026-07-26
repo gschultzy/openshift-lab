@@ -1,0 +1,149 @@
+---
+- name: Check Site-A and Site-B for spoke-side MCE conflicts
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure Site-A and Site-B kubeconfig directories exist
+      ansible.builtin.file:
+        path: "{{ item | dirname }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ site_a_kubeconfig_file }}"
+        - "{{ site_b_kubeconfig_file | default(build_root + '/site-b/auth/kubeconfig') }}"
+
+    - name: Extract Site-A kubeconfig when present
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+      failed_when: false
+
+    - name: Extract Site-B kubeconfig when present
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file | default(build_root + '/site-b/auth/kubeconfig') }}
+        chmod 0600 {{ site_b_kubeconfig_file | default(build_root + '/site-b/auth/kubeconfig') }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+      failed_when: false
+
+    - name: Show hub registration state and spoke MCE state
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Hub managed clusters'
+        oc --kubeconfig {{ hub_kubeconfig }} get managedcluster {{ bm_cluster_name }} {{ site_b_cluster_name }} -o wide || true
+        echo
+        echo '# Hub add-ons'
+        oc --kubeconfig {{ hub_kubeconfig }} -n {{ bm_cluster_name }} get managedclusteraddon || true
+        oc --kubeconfig {{ hub_kubeconfig }} -n {{ site_b_cluster_name }} get managedclusteraddon || true
+        echo
+        for entry in "Site-A {{ site_a_kubeconfig_file }}" "Site-B {{ site_b_kubeconfig_file | default(build_root + '/site-b/auth/kubeconfig') }}"; do
+          name=$(echo "$entry" | awk '{print $1}')
+          k=$(echo "$entry" | awk '{print $2}')
+          echo
+          echo "# ${name} open-cluster-management namespaces"
+          if [ -s "$k" ]; then
+            oc --kubeconfig "$k" get ns | egrep 'open-cluster-management|multicluster' || true
+            echo "# ${name} hub import agents"
+            oc --kubeconfig "$k" -n open-cluster-management-agent get pods -o wide || true
+            oc --kubeconfig "$k" -n open-cluster-management-agent-addon get pods -o wide || true
+            oc --kubeconfig "$k" -n open-cluster-management-agent-addon-discovery get pods -o wide || true
+            echo "# ${name} local MCE objects"
+            oc --kubeconfig "$k" get multiclusterengine -A || true
+            oc --kubeconfig "$k" -n multicluster-engine get subscription,csv,pods || true
+          else
+            echo "No kubeconfig at $k"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: spoke_mce_conflicts
+
+    - name: Print diagnostics
+      ansible.builtin.debug:
+        var: spoke_mce_conflicts.stdout_lines
+
+
+    - name: Fail if stale local ACM/MCE hub components exist on the spokes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        bad=0
+
+        check_spoke() {
+          local display="$1"
+          local kubeconfig="$2"
+
+          echo "# Checking ${display} for unsupported local MCE/ACM hub remnants"
+          if [ ! -s "$kubeconfig" ]; then
+            echo "ERROR: kubeconfig missing for ${display}: ${kubeconfig}" >&2
+            bad=1
+            return 0
+          fi
+
+          if oc --kubeconfig "$kubeconfig" get multiclusterengine -A --no-headers 2>/dev/null | grep -q .; then
+            echo "ERROR: ${display} still has local MultiClusterEngine resources. This lab expects MCE only on hub-sno." >&2
+            oc --kubeconfig "$kubeconfig" get multiclusterengine -A 2>/dev/null || true
+            bad=1
+          fi
+
+          if oc --kubeconfig "$kubeconfig" get ns open-cluster-management-hub multicluster-engine --ignore-not-found --no-headers 2>/dev/null | grep -q .; then
+            echo "ERROR: ${display} still has local hub/MCE namespaces." >&2
+            oc --kubeconfig "$kubeconfig" get ns open-cluster-management-hub multicluster-engine --ignore-not-found 2>/dev/null || true
+            bad=1
+          fi
+
+          local crd=managedclusteraddons.addon.open-cluster-management.io
+          if oc --kubeconfig "$kubeconfig" get crd "$crd" >/dev/null 2>&1; then
+            local strategy svc_ns svc_name
+            strategy="$(oc --kubeconfig "$kubeconfig" get crd "$crd" -o jsonpath='{.spec.conversion.strategy}' 2>/dev/null || true)"
+            svc_ns="$(oc --kubeconfig "$kubeconfig" get crd "$crd" -o jsonpath='{.spec.conversion.webhook.clientConfig.service.namespace}' 2>/dev/null || true)"
+            svc_name="$(oc --kubeconfig "$kubeconfig" get crd "$crd" -o jsonpath='{.spec.conversion.webhook.clientConfig.service.name}' 2>/dev/null || true)"
+            if [ "$strategy" = "Webhook" ] && [ -n "$svc_ns" ] && [ -n "$svc_name" ]; then
+              if ! oc --kubeconfig "$kubeconfig" -n "$svc_ns" get svc "$svc_name" >/dev/null 2>&1; then
+                echo "ERROR: ${display} has a stale ManagedClusterAddOn conversion webhook: ${svc_ns}/${svc_name} is missing." >&2
+                bad=1
+              fi
+            fi
+          fi
+        }
+
+        check_spoke "Site-A" "{{ site_a_kubeconfig_file }}"
+        check_spoke "Site-B" "{{ site_b_kubeconfig_file | default(build_root + '/site-b/auth/kubeconfig') }}"
+
+        if [ "$bad" -ne 0 ]; then
+          echo
+          echo "Refusing to continue because a spoke has local MCE/ACM hub leftovers."
+          echo "Run: CONFIRM_REMOVE_LOCAL_MCE=true ./scripts/cleanup-spoke-local-mce.sh"
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Print cleanup guidance
+      ansible.builtin.debug:
+        msg:
+          - "If Site-A/Site-B still show as Unknown, repair the ACM import agents first."
+          - "If Site-A/Site-B local consoles show Fleet Management with local-cluster Unknown, stale spoke-side ACM/MCE is still installed."
+          - "For this lab, keep ACM/MCE only on hub-sno and clean stale local spoke hubs with: CONFIRM_REMOVE_LOCAL_MCE=true ./scripts/cleanup-spoke-local-mce.sh"
+          - "The policy playbooks no longer install a second MCE on Site-A/Site-B; they use the hub hypershift-addon instead."

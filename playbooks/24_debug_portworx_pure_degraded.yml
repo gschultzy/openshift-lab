@@ -1,0 +1,146 @@
+---
+- name: Debug degraded Portworx Pure FlashArray install on Site-A and Site-B
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure spoke kubeconfig output directories exist
+      ansible.builtin.file:
+        path: "{{ item | dirname }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ site_a_kubeconfig_file }}"
+        - "{{ site_b_kubeconfig_file }}"
+
+    - name: Extract Site-A admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Extract Site-B admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Show hub-side policy status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Hub managed clusters'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster -o wide
+        echo
+        echo '# Hub Portworx policies'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ portworx_pure_policy_namespace }} get policy,placement,placementdecision,placementbinding,managedclustersetbinding -o wide || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: debug_portworx_pure_hub
+
+    - name: Print hub-side policy status
+      ansible.builtin.debug:
+        var: debug_portworx_pure_hub.stdout_lines
+
+    - name: Debug Site-A Portworx/Pure state
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ site_a_kubeconfig_file | quote }}
+        echo '# Site-A MCPs'
+        oc --kubeconfig "$K" get mcp || true
+        echo
+        echo '# Site-A nodes'
+        oc --kubeconfig "$K" get nodes -o wide || true
+        echo
+        echo '# Site-A MCO'
+        oc --kubeconfig "$K" get co machine-config || true
+        echo
+        echo '# Site-A Portworx namespace resources'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} get all,subscription,csv,storagecluster,secret/px-pure-secret -o wide 2>/dev/null || true
+        echo
+        echo '# Site-A StorageCluster describe'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} describe storagecluster {{ portworx_storagecluster_name }} 2>/dev/null || true
+        echo
+        echo '# Site-A Portworx events'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} get events --sort-by=.lastTimestamp 2>/dev/null | tail -100 || true
+        echo
+        echo '# Site-A Portworx operator logs'
+        OP=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods -l name=portworx-operator -o name 2>/dev/null | head -n1 || true)
+        if [ -n "$OP" ]; then
+          oc --kubeconfig "$K" -n {{ portworx_namespace }} logs "$OP" --all-containers --tail=200 || true
+        else
+          echo 'No portworx-operator pod found using label name=portworx-operator'
+          oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods -o name 2>/dev/null | grep -i operator | head -n1 | xargs -r -I{} oc --kubeconfig "$K" -n {{ portworx_namespace }} logs {} --all-containers --tail=200 || true
+        fi
+        echo
+        echo '# Site-A StorageClasses'
+        oc --kubeconfig "$K" get sc || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: debug_site_a_portworx_pure
+
+    - name: Print Site-A Portworx/Pure debug
+      ansible.builtin.debug:
+        var: debug_site_a_portworx_pure.stdout_lines
+
+    - name: Debug Site-B Portworx/Pure state
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ site_b_kubeconfig_file | quote }}
+        echo '# Site-B MCPs'
+        oc --kubeconfig "$K" get mcp || true
+        echo
+        echo '# Site-B nodes'
+        oc --kubeconfig "$K" get nodes -o wide || true
+        echo
+        echo '# Site-B MCO'
+        oc --kubeconfig "$K" get co machine-config || true
+        echo
+        echo '# Site-B Portworx namespace resources'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} get all,subscription,csv,storagecluster,secret/px-pure-secret -o wide 2>/dev/null || true
+        echo
+        echo '# Site-B StorageCluster describe'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} describe storagecluster {{ portworx_storagecluster_name }} 2>/dev/null || true
+        echo
+        echo '# Site-B Portworx events'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} get events --sort-by=.lastTimestamp 2>/dev/null | tail -100 || true
+        echo
+        echo '# Site-B Portworx operator logs'
+        OP=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods -l name=portworx-operator -o name 2>/dev/null | head -n1 || true)
+        if [ -n "$OP" ]; then
+          oc --kubeconfig "$K" -n {{ portworx_namespace }} logs "$OP" --all-containers --tail=200 || true
+        else
+          echo 'No portworx-operator pod found using label name=portworx-operator'
+          oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods -o name 2>/dev/null | grep -i operator | head -n1 | xargs -r -I{} oc --kubeconfig "$K" -n {{ portworx_namespace }} logs {} --all-containers --tail=200 || true
+        fi
+        echo
+        echo '# Site-B StorageClasses'
+        oc --kubeconfig "$K" get sc || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: debug_site_b_portworx_pure
+
+    - name: Print Site-B Portworx/Pure debug
+      ansible.builtin.debug:
+        var: debug_site_b_portworx_pure.stdout_lines

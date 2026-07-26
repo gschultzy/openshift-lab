@@ -1,0 +1,36 @@
+---
+- name: Discover iDRAC NIC MACs and link state for bare-metal nodes
+  hosts: ansible_controller
+  gather_facts: false
+  vars:
+    idrac_discovery_auto_update_inventory: false
+    idrac_discovery_inventory_file: "{{ repo_root }}/inventories/pod22/group_vars/all/main.yml"
+    idrac_discovery_preferred_port: "1"
+  tasks:
+    - name: Build enabled bare-metal node list for NIC discovery
+      ansible.builtin.set_fact:
+        bm_enabled_nodes_json: "{{ bm_nodes | selectattr('enabled', 'equalto', true) | list | to_json }}"
+
+    - name: Build iDRAC NIC discovery command
+      ansible.builtin.set_fact:
+        idrac_nic_discovery_argv: "{{ [repo_root ~ '/scripts/discover-idrac-nics.py', '--nodes-json', bm_enabled_nodes_json, '--user', vault_idrac_username, '--preferred-port', idrac_discovery_preferred_port | string] + ((idrac_discovery_auto_update_inventory | bool) | ternary(['--auto-fill-placeholders', '--write-inventory', idrac_discovery_inventory_file], [])) }}"
+
+    - name: Discover host NIC MACs and link status through iDRAC Redfish
+      ansible.builtin.command:
+        argv: "{{ idrac_nic_discovery_argv }}"
+      environment:
+        IDRAC_PASSWORD: "{{ vault_idrac_password }}"
+      register: idrac_nic_discovery
+      changed_when: "'UPDATED_INVENTORY:' in idrac_nic_discovery.stdout"
+      no_log: false
+
+    - name: Show iDRAC NIC discovery results
+      ansible.builtin.debug:
+        msg: "{{ idrac_nic_discovery.stdout_lines }}"
+
+    - name: Show likely RHCOS interface-name fix for R6525 Broadcom NICs
+      ansible.builtin.debug:
+        msg:
+          - "iDRAC discovers hardware MAC/link state. The playbook can now auto-fill placeholder boot_mac values when idrac_discovery_auto_update_inventory=true."
+          - "For these R6525 Broadcom ports the RHCOS Linux interface name is commonly eno33np0 for Integrated NIC 1 Port 1."
+          - "If the static IP still does not apply, confirm the Agent inventory/console shows primary_interface: eno33np0."

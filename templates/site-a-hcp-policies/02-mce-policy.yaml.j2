@@ -1,0 +1,58 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: site-a-mce-hcp-hosting
+  namespace: {{ site_a_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Site-A HCP
+    policy.open-cluster-management.io/categories: Cluster lifecycle
+    policy.open-cluster-management.io/controls: Install MCE for HCP hosting
+spec:
+  remediationAction: {{ site_a_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: site-a-mce-hcp-hosting
+        spec:
+          remediationAction: {{ site_a_policy_remediation_action }}
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ site_a_mce_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: multicluster-engine-group
+                  namespace: {{ site_a_mce_namespace }}
+                spec:
+                  targetNamespaces:
+                    - {{ site_a_mce_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: multicluster-engine
+                  namespace: {{ site_a_mce_namespace }}
+                spec:
+                  channel: {{ site_a_mce_subscription_channel }}
+                  installPlanApproval: {{ site_a_mce_install_plan_approval }}
+                  name: multicluster-engine
+                  source: {{ site_a_mce_operator_source }}
+                  sourceNamespace: {{ site_a_mce_operator_source_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: multicluster.openshift.io/v1
+                kind: MultiClusterEngine
+                metadata:
+                  name: {{ site_a_mce_name }}
+                spec: {}

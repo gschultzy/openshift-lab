@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ portworx_pure_policy_namespace }}
+---
+{% for clusterset in portworx_pure_managed_clustersets | unique %}
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ clusterset }}
+  namespace: {{ portworx_pure_policy_namespace }}
+spec:
+  clusterSet: {{ clusterset }}
+---
+{% endfor %}
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ portworx_pure_policy_placement_name }}
+  namespace: {{ portworx_pure_policy_namespace }}
+spec:
+{% if portworx_pure_tolerate_unreachable | default(false) | bool %}
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+      effect: NoSelect
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+      effect: NoSelect
+{% endif %}
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            {{ portworx_pure_policy_cluster_label_key }}: "{{ portworx_pure_policy_cluster_label_value }}"
+---
+{#
+  Keep the main Portworx binding stable. hcp-create.sh sometimes calls this
+  playbook in "StorageClass-only" mode to make sure the HCP StorageClasses
+  exist before creating HostedClusters. That mode must not overwrite the main
+  Portworx binding and detach the node-prep/operator/storagecluster/console
+  policies from placement, otherwise the ACM UI shows those policies as not
+  selected by any clusters.
+#}
+{% set apply_node_prep = portworx_pure_apply_node_prep | default(true) | bool %}
+{% set apply_operator = portworx_pure_apply_operator | default(true) | bool %}
+{% set apply_storagecluster = portworx_pure_apply_storagecluster | default(true) | bool %}
+{% set apply_console_plugin = portworx_enable_openshift_console_plugin | default(true) | bool and apply_operator %}
+{% set apply_hcp_storageclasses = portworx_pure_apply_hcp_storageclasses | default(true) | bool %}
+{% set apply_main_portworx_binding = apply_node_prep or apply_operator or apply_storagecluster or apply_console_plugin %}
+{% if apply_main_portworx_binding %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ portworx_pure_policy_binding_name }}
+  namespace: {{ portworx_pure_policy_namespace }}
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: {{ portworx_pure_policy_placement_name }}
+subjects:
+{% if apply_node_prep %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-pure-node-prep
+{% endif %}
+{% if apply_operator %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-operator
+{% endif %}
+{% if apply_storagecluster %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-pure-secret
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-flasharray-storagecluster
+{% endif %}
+{% if apply_console_plugin %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-openshift-console-plugin
+{% endif %}
+{% if apply_hcp_storageclasses %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-hcp-storageclasses
+{% endif %}
+---
+{% endif %}
+{% if apply_hcp_storageclasses %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: portworx-hcp-storageclasses-binding
+  namespace: {{ portworx_pure_policy_namespace }}
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: {{ portworx_pure_policy_placement_name }}
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: portworx-hcp-storageclasses
+{% endif %}

@@ -1,0 +1,76 @@
+---
+- name: Enable and validate bare-metal provisioning services on the ACM hub
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Wait for BareMetalHost and Provisioning CRDs from Metal3/BMO
+      ansible.builtin.command: "oc get crd {{ item }}"
+      register: metal3_required_crd
+      changed_when: false
+      retries: 120
+      delay: 15
+      until: metal3_required_crd.rc == 0
+      loop:
+        - baremetalhosts.metal3.io
+        - provisionings.metal3.io
+
+    - name: Ensure openshift-machine-api namespace exists
+      ansible.builtin.command: oc get namespace openshift-machine-api
+      register: machine_api_ns
+      changed_when: false
+      retries: 60
+      delay: 10
+      until: machine_api_ns.rc == 0
+
+    - name: Create Metal3 Provisioning CR for virtual media / no provisioning network
+      ansible.builtin.shell: |
+        cat <<'EOF' | oc apply -f -
+        apiVersion: metal3.io/v1alpha1
+        kind: Provisioning
+        metadata:
+          name: provisioning-configuration
+        spec:
+          provisioningNetwork: Disabled
+          watchAllNamespaces: true
+        EOF
+      args:
+        executable: /bin/bash
+      register: provisioning_apply
+      changed_when: "'configured' in provisioning_apply.stdout or 'created' in provisioning_apply.stdout"
+
+    - name: Wait for Provisioning CR to be available
+      ansible.builtin.command: oc get provisioning provisioning-configuration -o yaml
+      register: provisioning_cr
+      changed_when: false
+      retries: 60
+      delay: 10
+      until: provisioning_cr.rc == 0
+
+    - name: Wait for Metal3 / Bare Metal Operator pods to start where present
+      ansible.builtin.shell: |
+        set -o pipefail
+        oc get pods -A | egrep -i 'metal3|baremetal|ironic' || true
+      args:
+        executable: /bin/bash
+      register: metal3_pods
+      changed_when: false
+      retries: 60
+      delay: 15
+      until: metal3_pods.stdout | length > 0
+
+    - name: Show provisioning resources
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo '## BareMetalHost CRD'; oc get crd baremetalhosts.metal3.io
+        echo; echo '## Provisioning CR'; oc get provisioning provisioning-configuration -o yaml
+        echo; echo '## BareMetal / Assisted pods'; oc get pods -A | egrep -i 'assisted|baremetal|metal3|ironic|image-service' || true
+      args:
+        executable: /bin/bash
+      register: bm_provisioning_state
+      changed_when: false
+
+    - name: Print bare-metal provisioning state
+      ansible.builtin.debug:
+        var: bm_provisioning_state.stdout_lines

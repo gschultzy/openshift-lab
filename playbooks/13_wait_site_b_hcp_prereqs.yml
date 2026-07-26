@@ -1,0 +1,134 @@
+---
+- name: Wait for Site-B HCP prerequisites installed by RHACM policies
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure Site-B kubeconfig output directory exists
+      ansible.builtin.file:
+        path: "{{ site_b_kubeconfig_file | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Extract Site-B admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Show Site-B policy compliance from hub
+      ansible.builtin.command: oc -n {{ site_b_policy_namespace }} get policy -o wide
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: false
+      register: policy_status
+
+    - name: Print policy compliance
+      ansible.builtin.debug:
+        var: policy_status.stdout_lines
+
+    - name: Wait for OpenShift Virtualization HyperConverged to become Available
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_virt_namespace }}
+        wait hyperconverged/kubevirt-hyperconverged --for=condition=Available --timeout=45m
+      changed_when: false
+
+    - name: Check Site-B HyperShift managed cluster add-on status on hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# ManagedClusterAddOn hypershift-addon'
+        oc -n {{ site_b_cluster_name }} get managedclusteraddon hypershift-addon -o wide || true
+        echo
+        echo '# Conditions'
+        oc -n {{ site_b_cluster_name }} get managedclusteraddon hypershift-addon \
+          -o jsonpath='{range .status.conditions[*]}{.type}={.status} reason={.reason} message={.message}{"\n"}{end}' || true
+        echo
+        echo '# Related ManifestWorks'
+        oc -n {{ site_b_cluster_name }} get manifestwork 2>/dev/null | egrep -i 'hypershift|addon' || true
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      register: site_b_hypershift_addon_available
+      changed_when: false
+      failed_when: false
+
+    - name: Print Site-B HyperShift add-on status
+      ansible.builtin.debug:
+        var: site_b_hypershift_addon_available.stdout_lines
+
+    - name: Wait for Site-B HyperShift operator and CRDs to be usable on the spoke
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K="{{ site_b_kubeconfig_file }}"
+
+        echo '# Required HyperShift CRDs'
+        oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io
+
+        echo
+        echo '# HyperShift operator deployment'
+        oc --kubeconfig "$K" -n hypershift get deployment/operator
+        oc --kubeconfig "$K" -n hypershift rollout status deployment/operator --timeout=2m
+      args:
+        executable: /bin/bash
+      register: site_b_hypershift_addon_available_operator_usable
+      changed_when: false
+      retries: 30
+      delay: 20
+      until: site_b_hypershift_addon_available_operator_usable.rc == 0
+
+    - name: Print Site-B HyperShift operator readiness
+      ansible.builtin.debug:
+        var: site_b_hypershift_addon_available_operator_usable.stdout_lines
+
+    - name: Wait for MetalLB CRD to exist
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ site_b_kubeconfig_file }}
+        wait --for=condition=Established crd/ipaddresspools.metallb.io --timeout=15m
+      changed_when: false
+
+    - name: Show Site-B HCP prerequisite status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Site-B cluster operators'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} get co
+        echo
+        echo '# Virtualization'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_virt_namespace }} get hyperconverged,pods
+        echo
+        echo '# HyperShift add-on on hub'
+        oc --kubeconfig {{ hub_kubeconfig }} -n {{ site_b_cluster_name }} get managedclusteraddon hypershift-addon -o wide || true
+        echo
+        echo '# HyperShift / HCP pods on Site-B'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} get pods -A | egrep -i 'hypershift|hosted|capi|mce' || true
+        echo
+        echo '# MetalLB'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_metallb_namespace }} get metallb,ipaddresspool,l2advertisement,pods
+        echo
+        echo '# Ingress wildcard policy'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n openshift-ingress-operator get ingresscontroller default -o jsonpath='{.spec.routeAdmission.wildcardPolicy}{"\n"}'
+        echo
+        echo '# Storage classes'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} get sc
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: prereq_status
+
+    - name: Print Site-B HCP prerequisite status
+      ansible.builtin.debug:
+        var: prereq_status.stdout_lines

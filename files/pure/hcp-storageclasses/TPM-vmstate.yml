@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+ annotations:
+ name: vmstate
+parameters:
+ repl: "3"
+ sharedv4: "true"
+ sharedv4_svc_type: "ClusterIP"
+provisioner: pxd.portworx.com
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

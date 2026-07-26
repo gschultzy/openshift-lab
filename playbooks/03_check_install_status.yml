@@ -1,0 +1,141 @@
+---
+- name: Check SNO Agent install status
+  hosts: ansible_controller
+  gather_facts: true
+  tasks:
+    - name: Show status targets
+      ansible.builtin.debug:
+        msg:
+          - "Cluster: {{ cluster_name }}.{{ base_domain }}"
+          - "SNO IP: {{ sno_node.ip }}"
+          - "Install dir: {{ install_dir }}"
+          - "API DNS: api.{{ cluster_name }}.{{ base_domain }}"
+          - "API-INT DNS: api-int.{{ cluster_name }}.{{ base_domain }}"
+          - "Apps DNS test: console-openshift-console.apps.{{ cluster_name }}.{{ base_domain }}"
+
+    - name: Get VM information from vCenter
+      community.vmware.vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        name: "{{ sno_vm_name }}"
+      register: sno_vm_info
+      failed_when: false
+      delegate_to: localhost
+
+    - name: Show VM power and NIC summary
+      ansible.builtin.debug:
+        msg:
+          - "Power state: {{ sno_vm_info.instance.hw_power_status | default('unknown') }}"
+          - "Guest IP from VMware Tools, if available: {{ sno_vm_info.instance.ipv4 | default('not reported') }}"
+          - "Primary port group: {{ vm_network_eth0 }}"
+          - "Secondary NIC enabled: {{ sno_node.secondary_nic_enabled | default(false) | bool }}"
+          - "Expected disk.EnableUUID: TRUE"
+
+    - name: Show rendered AgentConfig NIC section if present
+      ansible.builtin.shell: |
+        if [ -f "{{ rendered_dir }}/agent-config.yaml" ]; then
+          sed -n '/interfaces:/,/networkConfig:/p' "{{ rendered_dir }}/agent-config.yaml"
+        elif [ -f "{{ install_dir }}/agent-config.yaml" ]; then
+          sed -n '/interfaces:/,/networkConfig:/p' "{{ install_dir }}/agent-config.yaml"
+        else
+          echo "No rendered agent-config.yaml found. If you changed NIC settings, rerun 01_render_agent_iso.yml."
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: rendered_agent_config_nics
+
+    - name: Print rendered AgentConfig NIC section
+      ansible.builtin.debug:
+        var: rendered_agent_config_nics.stdout_lines
+
+    - name: Check DNS resolution from bastion
+      ansible.builtin.shell: |
+        set -o pipefail
+        for n in \
+          api.{{ cluster_name }}.{{ base_domain }} \
+          api-int.{{ cluster_name }}.{{ base_domain }} \
+          console-openshift-console.apps.{{ cluster_name }}.{{ base_domain }}; do
+          echo "### $n"
+          getent hosts "$n" || true
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: dns_check
+
+    - name: Show DNS result
+      ansible.builtin.debug:
+        var: dns_check.stdout_lines
+
+    - name: Ping SNO static IP from bastion
+      ansible.builtin.command:
+        argv:
+          - ping
+          - -c
+          - "3"
+          - -W
+          - "2"
+          - "{{ sno_node.ip }}"
+      changed_when: false
+      register: ping_sno
+      failed_when: false
+
+    - name: Show ping result
+      ansible.builtin.debug:
+        var: ping_sno.stdout_lines
+
+    - name: Check key OpenShift ports from bastion
+      ansible.builtin.wait_for:
+        host: "{{ sno_node.ip }}"
+        port: "{{ item }}"
+        timeout: 5
+        connect_timeout: 3
+        state: started
+      loop:
+        - 22
+        - 6443
+        - 22623
+      register: port_checks
+      failed_when: false
+      changed_when: false
+
+    - name: Show port check result
+      ansible.builtin.debug:
+        msg: >-
+          Port {{ item.item }} status: {{ 'open' if not item.failed else 'closed/unreachable' }}
+      loop: "{{ port_checks.results }}"
+
+    - name: Tail installer log if present
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ -f "{{ install_dir }}/.openshift_install.log" ]; then
+          tail -n 160 "{{ install_dir }}/.openshift_install.log"
+        else
+          echo "No {{ install_dir }}/.openshift_install.log found yet"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: installer_log_tail
+
+    - name: Show installer log tail
+      ansible.builtin.debug:
+        var: installer_log_tail.stdout_lines
+
+    - name: Try to collect journal snippets from the booted agent host
+      ansible.builtin.shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=6 \
+          core@{{ sno_node.ip }} \
+          'echo "### hostname"; hostname; echo "### ip"; ip -br addr; echo "### routes"; ip route; echo "### agent-related logs"; sudo journalctl -b --no-pager | egrep -i "agent|assisted|bootkube|release|pull|error|fail|fatal" | tail -n 180' 2>&1 || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: journal_tail
+
+    - name: Show agent host journal snippets
+      ansible.builtin.debug:
+        var: journal_tail.stdout_lines

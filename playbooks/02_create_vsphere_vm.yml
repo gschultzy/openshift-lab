@@ -1,0 +1,641 @@
+---
+- name: Create SNO VM on vSphere and boot from Agent ISO
+  hosts: ansible_controller
+  gather_facts: true
+  tasks:
+
+    - name: Check if existing hub cluster is already reachable
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [ ! -s "{{ hub_kubeconfig }}" ]; then
+          exit 1
+        fi
+        oc --kubeconfig "{{ hub_kubeconfig }}" get nodes >/dev/null
+        oc --kubeconfig "{{ hub_kubeconfig }}" get clusterversion version >/dev/null
+      args:
+        executable: /bin/bash
+      register: existing_hub_cluster
+      changed_when: false
+      failed_when: false
+
+    - name: Skip this hub install playbook when hub is already running
+      ansible.builtin.debug:
+        msg:
+          - "Hub SNO is already reachable and running. Skipping this install step."
+          - "Set FORCE_REBUILD_HUB=true in the environment or pass -e sno_force_rebuild=true if you really want to rebuild/re-run install."
+      when:
+        - existing_hub_cluster.rc == 0
+        - not (sno_force_rebuild | default(false) | bool)
+        - (lookup('ansible.builtin.env', 'FORCE_REBUILD_HUB') | default('false') | lower) not in ['true', '1', 'yes', 'y']
+
+    - name: End play when hub is already running
+      ansible.builtin.meta: end_play
+      when:
+        - existing_hub_cluster.rc == 0
+        - not (sno_force_rebuild | default(false) | bool)
+        - (lookup('ansible.builtin.env', 'FORCE_REBUILD_HUB') | default('false') | lower) not in ['true', '1', 'yes', 'y']
+    - name: Build datastore ISO folder list
+      ansible.builtin.set_fact:
+        iso_datastore_folder_levels: >-
+          {%- set parts = (iso_datastore_folder | default('') | trim('/')).split('/') if (iso_datastore_folder | default('') | trim('/')) | length > 0 else [] -%}
+          {%- set ns = namespace(paths=[]) -%}
+          {%- for part in parts -%}
+          {%-   set current = (ns.paths[-1] ~ '/' ~ part) if ns.paths | length > 0 else part -%}
+          {%-   set _ = ns.paths.append(current) -%}
+          {%- endfor -%}
+          {{ ns.paths }}
+
+    - name: Calculate effective ISO filename for this run
+      ansible.builtin.set_fact:
+        iso_datastore_name_effective: >-
+          {{ (cluster_name ~ '-agent-' ~ ansible_date_time.epoch ~ '.x86_64.iso')
+             if (iso_unique_per_upload | default(true) | bool)
+             else iso_datastore_name }}
+
+    - name: Calculate effective ISO paths for this run
+      ansible.builtin.set_fact:
+        iso_datastore_path_effective: >-
+          {{ ((iso_datastore_folder | default('') | trim('/')) ~ '/') if ((iso_datastore_folder | default('') | trim('/')) | length > 0) else '' }}{{ iso_datastore_name_effective }}
+        iso_vsphere_path_effective: >-
+          [{{ vsphere_datastore }}] {{ ((iso_datastore_folder | default('') | trim('/')) ~ '/') if ((iso_datastore_folder | default('') | trim('/')) | length > 0) else '' }}{{ iso_datastore_name_effective }}
+        esxi_iso_path_effective: >-
+          {{ esxi_datastore_mount }}/{{ ((iso_datastore_folder | default('') | trim('/')) ~ '/') if ((iso_datastore_folder | default('') | trim('/')) | length > 0) else '' }}{{ iso_datastore_name_effective }}
+
+    - name: Show datastore ISO upload target
+      ansible.builtin.debug:
+        msg:
+          - "Upload method: {{ iso_upload_method }}"
+          - "Datastore: {{ vsphere_datastore }}"
+          - "Datacenter: {{ vsphere_datacenter }}"
+          - "ISO folder levels: {{ iso_datastore_folder_levels }}"
+          - "ISO datastore path: {{ iso_datastore_path_effective }}"
+          - "VM CD-ROM path: {{ iso_vsphere_path_effective }}"
+          - "ESXi datastore path: {{ esxi_iso_path_effective if iso_upload_method == 'esxi_ssh' else 'not used' }}"
+
+    - name: Verify generated Agent ISO exists locally
+      ansible.builtin.stat:
+        path: "{{ agent_iso_local }}"
+      register: agent_iso_stat
+
+    - name: Fail if Agent ISO is missing
+      ansible.builtin.assert:
+        that:
+          - agent_iso_stat.stat.exists
+          - agent_iso_stat.stat.size | int > 0
+        fail_msg: >-
+          Agent ISO was not found at {{ agent_iso_local }}. Run playbooks/01_render_agent_iso.yml first.
+
+    - name: Validate ESXi SSH upload variables
+      ansible.builtin.assert:
+        that:
+          - esxi_hostname is defined
+          - esxi_username is defined
+          - esxi_password is defined
+          - esxi_datastore_mount is defined
+          - esxi_iso_dir is defined
+          - esxi_iso_path_effective is defined
+        fail_msg: >-
+          iso_upload_method is esxi_ssh, but one or more ESXi SSH variables are missing.
+          Check inventories/pod22/group_vars/all/main.yml and vault.yml.
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Check ESXi SSH port is reachable
+      ansible.builtin.wait_for:
+        host: "{{ esxi_hostname }}"
+        port: 22
+        timeout: 10
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Create ISO folder on ESXi datastore using SSH
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "mkdir -p '{{ esxi_iso_dir }}'"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: true
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Show ESXi datastore space and ISO directory
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "df -h '{{ esxi_datastore_mount }}' && ls -ld '{{ esxi_iso_dir }}'"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      register: esxi_datastore_check
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Print ESXi datastore space and ISO directory
+      ansible.builtin.debug:
+        var: esxi_datastore_check.stdout_lines
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Upload Agent ISO directly to ESXi datastore using legacy SCP protocol
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - scp
+          - -O
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ agent_iso_local }}"
+          - "{{ esxi_username }}@{{ esxi_hostname }}:{{ esxi_iso_path_effective }}"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: true
+      register: esxi_scp_upload
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Confirm ISO exists on ESXi datastore
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - "test -s '{{ esxi_iso_path_effective }}' && ls -lh '{{ esxi_iso_path_effective }}'"
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      register: esxi_iso_check
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Show ESXi ISO upload result
+      ansible.builtin.debug:
+        msg:
+          - "ISO uploaded to {{ iso_vsphere_path_effective }} via ESXi SSH/SCP."
+          - "Remote check: {{ esxi_iso_check.stdout | default('not checked') }}"
+      when: iso_upload_method == 'esxi_ssh'
+
+    - name: Ensure ISO folder path exists on datastore through vCenter API
+      community.vmware.vsphere_file:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        datastore: "{{ vsphere_datastore }}"
+        path: "{{ item }}"
+        state: directory
+      loop: "{{ iso_datastore_folder_levels }}"
+      when:
+        - iso_upload_method == 'vcenter_api'
+        - iso_datastore_folder_levels | length > 0
+      delegate_to: localhost
+
+    - name: Upload Agent ISO to datastore through vCenter API
+      community.vmware.vsphere_copy:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        datastore: "{{ vsphere_datastore }}"
+        src: "{{ agent_iso_local }}"
+        path: "{{ iso_datastore_path_effective }}"
+        timeout: 1800
+      when: iso_upload_method == 'vcenter_api'
+      delegate_to: localhost
+
+
+    - name: Discover vSphere inventory before VM creation
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/discover-vsphere-inventory.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+      changed_when: false
+      no_log: true
+      register: vsphere_inventory_raw
+
+    - name: Parse discovered vSphere inventory before VM creation
+      ansible.builtin.set_fact:
+        vsphere_inventory: "{{ vsphere_inventory_raw.stdout | from_json }}"
+
+    - name: Build SNO VM network adapter list
+      ansible.builtin.set_fact:
+        sno_vm_networks: "{{ primary_sno_vm_network + secondary_sno_vm_network }}"
+      vars:
+        primary_sno_vm_network:
+          - name: "{{ vm_network_eth0 }}"
+            device_type: vmxnet3
+            mac: "{{ sno_node.mac_eth0 }}"
+            start_connected: true
+        secondary_sno_vm_network: >-
+          {{
+            [
+              {
+                'name': vm_network_eth1,
+                'device_type': 'vmxnet3',
+                'mac': sno_node.mac_eth1,
+                'start_connected': true
+              }
+            ]
+            if (sno_node.secondary_nic_enabled | default(false) | bool)
+            else []
+          }}
+
+    - name: Build SNO VM disk list
+      ansible.builtin.set_fact:
+        sno_vm_disks: >-
+          {{
+            [
+              {
+                'size_gb': sno_vm_disk_gb,
+                'type': 'thin',
+                'datastore': vsphere_datastore
+              }
+            ]
+            +
+            (
+              [
+                {
+                  'size_gb': sno_vm_extra_disk_gb | default(800),
+                  'type': sno_vm_extra_disk_type | default('thin'),
+                  'datastore': vsphere_datastore
+                }
+              ]
+              if (sno_vm_extra_disk_enabled | default(false) | bool)
+              else []
+            )
+          }}
+
+    - name: Show SNO VM network and disk plan
+      ansible.builtin.debug:
+        msg:
+          - "Primary NIC only: {{ not (sno_node.secondary_nic_enabled | default(false) | bool) }}"
+          - "VM networks: {{ sno_vm_networks }}"
+          - "VM disks: {{ sno_vm_disks }}"
+          - "disk.EnableUUID will be set to {{ sno_vm_disk_enable_uuid | default(true) | bool }}"
+
+    - name: Validate configured vSphere datacenter exists before VM creation
+      ansible.builtin.assert:
+        that:
+          - vsphere_datacenter in (vsphere_inventory.datacenters | map(attribute='name') | list)
+        fail_msg: >-
+          No datacenter named {{ vsphere_datacenter }} was found. Available datacenters are
+          {{ vsphere_inventory.datacenters | map(attribute='name') | list }}.
+          Update vsphere_datacenter and vsphere_folder in inventories/pod22/group_vars/all/main.yml,
+          then rerun this playbook.
+
+    - name: Build vSphere datastore and network lists for selected datacenter
+      ansible.builtin.set_fact:
+        vsphere_datastores_in_dc: "{{ vsphere_inventory.datastores | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list }}"
+        vsphere_networks_in_dc: "{{ vsphere_inventory.networks | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list }}"
+
+    - name: Show discovered vSphere networks for selected datacenter
+      ansible.builtin.debug:
+        msg:
+          - "Discovered datastores in {{ vsphere_datacenter }}: {{ vsphere_datastores_in_dc }}"
+          - "Discovered networks in {{ vsphere_datacenter }}: {{ vsphere_networks_in_dc }}"
+          - "Requested SNO primary network: {{ vm_network_eth0 }}"
+
+    - name: Show ESXi standard and distributed switch details when primary port group is missing
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - >-
+            echo '## Standard vSwitches';
+            esxcli network vswitch standard list || true;
+            echo;
+            echo '## Standard Port Groups';
+            esxcli network vswitch standard portgroup list || true;
+            echo;
+            echo '## Distributed Switches';
+            esxcli network vswitch dvs vmware list || true
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      register: esxi_network_detail
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when:
+        - sno_primary_portgroup_auto_create | default(true) | bool
+        - vm_network_eth0 not in vsphere_networks_in_dc
+
+    - name: Print ESXi switch details when primary port group is missing
+      ansible.builtin.debug:
+        var: esxi_network_detail.stdout_lines
+      when:
+        - esxi_network_detail is defined
+        - esxi_network_detail.stdout_lines is defined
+        - not (esxi_upload_no_log | default(false) | bool)
+
+    - name: Check whether configured standard vSwitch exists
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - >-
+            esxcli network vswitch standard list | awk '/^Name:/ {print $2}' | grep -x '{{ esxi_vswitch_name }}'
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      changed_when: false
+      failed_when: false
+      register: esxi_standard_vswitch_check
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when:
+        - sno_primary_portgroup_auto_create | default(true) | bool
+        - vm_network_eth0 not in vsphere_networks_in_dc
+        - sno_primary_portgroup_create_mode | default('auto') in ['auto', 'standard']
+
+    - name: Auto-create missing SNO primary standard port group on ESXi
+      ansible.builtin.command:
+        argv:
+          - sshpass
+          - -e
+          - ssh
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - "{{ esxi_username }}@{{ esxi_hostname }}"
+          - >-
+            set -e;
+            esxcli network vswitch standard portgroup list | awk 'NR>1 {print $1}' | grep -x '{{ vm_network_eth0 }}' >/dev/null
+            || esxcli network vswitch standard portgroup add -p '{{ vm_network_eth0 }}' -v '{{ esxi_vswitch_name }}';
+            esxcli network vswitch standard portgroup set -p '{{ vm_network_eth0 }}' -v '{{ sno_primary_portgroup_vlan_id }}';
+            esxcli network vswitch standard portgroup list | grep -x '{{ vm_network_eth0 }}.*' || true
+      environment:
+        SSHPASS: "{{ esxi_password }}"
+      register: auto_create_portgroup_result
+      changed_when: true
+      no_log: "{{ esxi_upload_no_log | default(false) | bool }}"
+      when:
+        - sno_primary_portgroup_auto_create | default(true) | bool
+        - vm_network_eth0 not in vsphere_networks_in_dc
+        - sno_primary_portgroup_create_mode | default('auto') in ['auto', 'standard']
+        - esxi_standard_vswitch_check is defined
+        - esxi_standard_vswitch_check.rc == 0
+
+    - name: Auto-create missing SNO primary distributed port group through vCenter
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/create-dvs-portgroup.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+          - --datacenter
+          - "{{ vsphere_datacenter }}"
+          - --switch-name
+          - "{{ sno_primary_dvs_name }}"
+          - --portgroup-name
+          - "{{ vm_network_eth0 }}"
+          - --vlan-id
+          - "{{ sno_primary_portgroup_vlan_id }}"
+          - --num-ports
+          - "{{ sno_primary_dvs_num_ports | default(128) }}"
+      changed_when: "'Created distributed port group' in auto_create_dvs_portgroup_result.stdout"
+      register: auto_create_dvs_portgroup_result
+      no_log: true
+      when:
+        - sno_primary_portgroup_auto_create | default(true) | bool
+        - vm_network_eth0 not in vsphere_networks_in_dc
+        - sno_primary_portgroup_create_mode | default('auto') in ['auto', 'distributed']
+        - (sno_primary_portgroup_create_mode | default('auto') == 'distributed') or
+          (esxi_standard_vswitch_check is not defined or esxi_standard_vswitch_check.rc != 0)
+
+    - name: Show auto-created SNO port group result
+      ansible.builtin.debug:
+        msg:
+          - "Standard create: {{ auto_create_portgroup_result.stdout_lines | default([]) }}"
+          - "Distributed create: {{ auto_create_dvs_portgroup_result.stdout_lines | default([]) }}"
+          - "If distributed create failed, check sno_primary_dvs_name. Discovery showed a DSwitch uplink object, so DSwitch is the likely value."
+      when:
+        - (auto_create_portgroup_result is defined) or (auto_create_dvs_portgroup_result is defined)
+        - not (esxi_upload_no_log | default(false) | bool)
+
+    - name: Wait briefly for vCenter to see new port group
+      ansible.builtin.pause:
+        seconds: 8
+      when:
+        - (auto_create_portgroup_result is defined and auto_create_portgroup_result is changed) or
+          (auto_create_dvs_portgroup_result is defined and auto_create_dvs_portgroup_result is changed)
+
+    - name: Rediscover vSphere inventory after optional port group creation
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/discover-vsphere-inventory.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+      changed_when: false
+      no_log: true
+      register: vsphere_inventory_raw_after_portgroup
+      when:
+        - (auto_create_portgroup_result is defined and auto_create_portgroup_result is changed) or
+          (auto_create_dvs_portgroup_result is defined and auto_create_dvs_portgroup_result is changed)
+
+    - name: Parse rediscovered vSphere inventory after optional port group creation
+      ansible.builtin.set_fact:
+        vsphere_inventory: "{{ vsphere_inventory_raw_after_portgroup.stdout | from_json }}"
+      when:
+        - vsphere_inventory_raw_after_portgroup is defined
+        - vsphere_inventory_raw_after_portgroup.stdout is defined
+
+    - name: Rebuild vSphere datastore and network lists after optional port group creation
+      ansible.builtin.set_fact:
+        vsphere_datastores_in_dc: "{{ vsphere_inventory.datastores | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list }}"
+        vsphere_networks_in_dc: "{{ vsphere_inventory.networks | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list }}"
+
+    - name: Show final discovered vSphere networks before VM creation
+      ansible.builtin.debug:
+        msg:
+          - "Final datastores in {{ vsphere_datacenter }}: {{ vsphere_datastores_in_dc }}"
+          - "Final networks in {{ vsphere_datacenter }}: {{ vsphere_networks_in_dc }}"
+          - "Requested SNO primary network: {{ vm_network_eth0 }}"
+
+    - name: Validate configured vSphere datastore and primary port group before VM creation
+      ansible.builtin.assert:
+        that:
+          - vsphere_datastore in vsphere_datastores_in_dc
+          - vm_network_eth0 in vsphere_networks_in_dc
+        fail_msg: >-
+          The configured datastore or primary port group does not exist in datacenter {{ vsphere_datacenter }}.
+          Available datastores: {{ vsphere_datastores_in_dc }}. Available networks: {{ vsphere_networks_in_dc }}. Either set vm_network_eth0 to a listed network such as MGMT, or set sno_primary_portgroup_auto_create=true and ensure esxi_vswitch_name/sno_primary_dvs_name is correct.
+          For this SNO hub, vm_network_eth1 is not required.
+
+    - name: Validate optional secondary vSphere port group before VM creation
+      ansible.builtin.assert:
+        that:
+          - vm_network_eth1 | length > 0
+          - vm_network_eth1 in (vsphere_inventory.networks | selectattr('datacenter', 'equalto', vsphere_datacenter) | map(attribute='name') | list)
+        fail_msg: >-
+          sno_node.secondary_nic_enabled is true, but vm_network_eth1 is empty or does not exist
+          in datacenter {{ vsphere_datacenter }}. Either set vm_network_eth1 to a real port group
+          or set sno_node.secondary_nic_enabled to false.
+      when: sno_node.secondary_nic_enabled | default(false) | bool
+
+    - name: Power off existing SNO VM before configure
+      community.vmware.vmware_guest_powerstate:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ sno_vm_name }}"
+        state: powered-off
+      failed_when: false
+      when: sno_vm_poweroff_before_configure | default(true) | bool
+      delegate_to: localhost
+
+    - name: Delete existing SNO VM when clean recreate is requested
+      community.vmware.vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        folder: "{{ vsphere_folder }}"
+        name: "{{ sno_vm_name }}"
+        state: absent
+        force: true
+      when: sno_vm_recreate | default(false) | bool
+      delegate_to: localhost
+
+    - name: Create or update SNO VM
+      community.vmware.vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        esxi_hostname: "{{ vsphere_esxi_hostname }}"
+        resource_pool: "{{ vsphere_resource_pool }}"
+        folder: "{{ vsphere_folder }}"
+        name: "{{ sno_vm_name }}"
+        state: present
+        guest_id: "{{ sno_vm_guest_id }}"
+        hardware:
+          memory_mb: "{{ sno_vm_memory_mb }}"
+          num_cpus: "{{ sno_vm_cpu }}"
+          scsi: paravirtual
+          boot_firmware: "{{ sno_vm_firmware }}"
+        disk: "{{ sno_vm_disks }}"
+        networks: "{{ sno_vm_networks }}"
+        cdrom:
+          - controller_number: 0
+            unit_number: 0
+            state: present
+            type: iso
+            iso_path: "{{ iso_vsphere_path_effective }}"
+        wait_for_ip_address: false
+      delegate_to: localhost
+
+    - name: Force disk.EnableUUID advanced setting with pyVmomi
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/set-vm-advanced-setting.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+          - --datacenter
+          - "{{ vsphere_datacenter }}"
+          - --vm
+          - "{{ sno_vm_name }}"
+          - --key
+          - disk.EnableUUID
+          - --value
+          - "{{ 'TRUE' if (sno_vm_disk_enable_uuid | default(true) | bool) else 'FALSE' }}"
+          - --insecure
+      changed_when: "'set disk.EnableUUID' in disk_uuid_result.stdout"
+      register: disk_uuid_result
+      no_log: true
+      delegate_to: localhost
+
+    - name: Show disk.EnableUUID result
+      ansible.builtin.debug:
+        msg: "disk.EnableUUID has been enforced for {{ sno_vm_name }}"
+
+    - name: Read SNO VM info after create/update
+      community.vmware.vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        name: "{{ sno_vm_name }}"
+      register: sno_vm_created_info
+      delegate_to: localhost
+
+    - name: Show SNO VM create/update result
+      ansible.builtin.debug:
+        msg:
+          - "VM {{ sno_vm_name }} exists and ISO is attached as {{ iso_vsphere_path_effective }}"
+          - "Expected disk.EnableUUID=TRUE. If vCenter still warns, power off the VM and rerun with sno_vm_recreate=true."
+
+    - name: Set VM boot order to disk first with CD-ROM fallback
+      community.vmware.vmware_guest_boot_manager:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ sno_vm_name }}"
+        # Keep disk first. On a blank VM, EFI falls through to the Agent ISO.
+        # After RHCOS writes the disk and reboots, the VM boots from disk instead of looping back into the ISO.
+        boot_order:
+          - disk
+          - cdrom
+        boot_delay: 5000
+      delegate_to: localhost
+
+    - name: Power on SNO VM
+      community.vmware.vmware_guest_powerstate:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ sno_vm_name }}"
+        state: powered-on
+      delegate_to: localhost

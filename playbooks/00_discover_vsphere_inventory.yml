@@ -1,0 +1,54 @@
+---
+- name: Discover vSphere inventory names
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+    - name: Discover vSphere inventory via pyVmomi
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/discover-vsphere-inventory.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+      changed_when: false
+      no_log: true
+      register: vsphere_inventory_raw
+
+    - name: Parse discovered inventory
+      ansible.builtin.set_fact:
+        vsphere_inventory: "{{ vsphere_inventory_raw.stdout | from_json }}"
+
+    - name: Show datacenters
+      ansible.builtin.debug:
+        msg: "{{ vsphere_inventory.datacenters | map(attribute='name') | list }}"
+
+    - name: Show hosts
+      ansible.builtin.debug:
+        msg: "{{ vsphere_inventory.hosts }}"
+
+    - name: Show datastores
+      ansible.builtin.debug:
+        msg: "{{ vsphere_inventory.datastores }}"
+
+    - name: Show networks / port groups
+      ansible.builtin.debug:
+        msg: "{{ vsphere_inventory.networks }}"
+
+    - name: Show VM folders
+      ansible.builtin.debug:
+        msg: "{{ vsphere_inventory.vm_folders }}"
+
+    - name: Show resource pools
+      ansible.builtin.debug:
+        msg: "{{ vsphere_inventory.resource_pools }}"
+
+    - name: Show suggested variable block
+      ansible.builtin.debug:
+        msg:
+          - "Set vsphere_datacenter to one of: {{ vsphere_inventory.datacenters | map(attribute='name') | list }}"
+          - "Set vsphere_folder to: /<your_datacenter>/vm"
+          - "Set vsphere_esxi_hostname to the host name exactly as shown above. It may be an FQDN, not 10.23.22.11."
+          - "Set vm_network_eth0/vm_network_eth1 to port group names exactly as shown above."

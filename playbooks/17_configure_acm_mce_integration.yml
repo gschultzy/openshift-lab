@@ -1,0 +1,144 @@
+---
+- name: Configure RHACM hub integration for Site-A and Site-B HyperShift hosting
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Validate this kubeconfig is the hub, not a spoke
+      ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
+      changed_when: false
+      register: acm_mce_hub_api_server
+
+    - name: Stop if RHACM/MCE integration is being run against Site-A or Site-B
+      ansible.builtin.fail:
+        msg: |
+          Refusing to configure RHACM/MCE integration because this kubeconfig is not hub-sno.
+
+          Current API server: {{ acm_mce_hub_api_server.stdout }}
+          Expected: api.{{ cluster_name }}.{{ base_domain }}
+
+          Point HUB_KUBECONFIG/KUBECONFIG at the hub kubeconfig:
+            export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
+            export KUBECONFIG=$HUB_KUBECONFIG
+      when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in acm_mce_hub_api_server.stdout"
+
+    - name: Confirm Site-A and Site-B ManagedClusters exist on the hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster {{ bm_cluster_name }}
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster {{ site_b_cluster_name }}
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Ensure HyperShift add-on install namespace exists on Site-A and Site-B
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mkdir -p {{ site_a_kubeconfig_file | dirname }} {{ site_b_kubeconfig_file | dirname }}
+
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+
+        for entry in \
+          "Site-A:{{ site_a_kubeconfig_file }}" \
+          "Site-B:{{ site_b_kubeconfig_file }}"; do
+          label="${entry%%:*}"
+          k="${entry#*:}"
+          echo "# Ensuring ${label} add-on namespace exists"
+          oc --kubeconfig "$k" create namespace open-cluster-management-agent-addon-discovery --dry-run=client -o yaml | oc --kubeconfig "$k" apply -f -
+        done
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Configure HyperShift add-on deployment config on RHACM/MCE hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat <<'EOF' | oc apply -f -
+        apiVersion: addon.open-cluster-management.io/v1alpha1
+        kind: AddOnDeploymentConfig
+        metadata:
+          name: hypershift-addon-deploy-config
+          namespace: multicluster-engine
+          labels:
+            cluster.open-cluster-management.io/backup: "true"
+        spec:
+          agentInstallNamespace: open-cluster-management-agent-addon-discovery
+          customizedVariables:
+          - name: configureMceImport
+            value: "true"
+          - name: disableMetrics
+            value: "true"
+          - name: disableHOManagement
+            value: "false"
+          - name: autoImportDisabled
+            value: "true"
+        EOF
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Enable HyperShift add-on for Site-A and Site-B managed clusters
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for c in {{ bm_cluster_name }} {{ site_b_cluster_name }}; do
+          if oc get managedcluster "$c" >/dev/null 2>&1; then
+            cat <<EOF | oc apply -f -
+        apiVersion: addon.open-cluster-management.io/v1alpha1
+        kind: ManagedClusterAddOn
+        metadata:
+          name: hypershift-addon
+          namespace: ${c}
+        spec:
+          installNamespace: open-cluster-management-agent-addon-discovery
+        EOF
+          else
+            echo "ManagedCluster ${c} not found; skipping hypershift-addon"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Show managed cluster and add-on status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Managed clusters'
+        oc get managedcluster
+        echo
+        echo '# Site-A add-ons'
+        oc -n {{ bm_cluster_name }} get managedclusteraddon || true
+        echo
+        echo '# Site-B add-ons'
+        oc -n {{ site_b_cluster_name }} get managedclusteraddon || true
+        echo
+        echo '# HyperShift add-on deploy config'
+        oc -n multicluster-engine get addondeploymentconfig hypershift-addon-deploy-config -o yaml
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: false
+      register: acm_mce_integration_status
+
+    - name: Print status
+      ansible.builtin.debug:
+        var: acm_mce_integration_status.stdout_lines

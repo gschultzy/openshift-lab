@@ -1,0 +1,161 @@
+---
+- name: Wait for Portworx Pure node prep MachineConfig rollout on Site-A and Site-B
+  hosts: localhost
+  gather_facts: false
+  vars:
+    portworx_pure_wait_mcp_retries: "{{ lookup('env', 'PORTWORX_PURE_WAIT_MCP_RETRIES') | default('90', true) }}"
+    portworx_pure_wait_mcp_delay: "{{ lookup('env', 'PORTWORX_PURE_WAIT_MCP_DELAY') | default('30', true) }}"
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Validate this kubeconfig is the hub, not a spoke
+      ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
+      changed_when: false
+      register: wait_portworx_pure_api_server
+
+    - name: Stop if running against Site-A or Site-B
+      ansible.builtin.fail:
+        msg: |
+          Refusing to wait/apply Portworx policies because this kubeconfig is not hub-sno.
+
+          Current API server: {{ wait_portworx_pure_api_server.stdout }}
+          Expected: api.{{ cluster_name }}.{{ base_domain }}
+      when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in wait_portworx_pure_api_server.stdout"
+
+    - name: Ensure spoke kubeconfig output directories exist
+      ansible.builtin.file:
+        path: "{{ item | dirname }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ site_a_kubeconfig_file }}"
+        - "{{ site_b_kubeconfig_file }}"
+
+    - name: Extract Site-A admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Extract Site-B admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
+        chmod 0600 {{ site_b_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Wait for Site-A master MachineConfigPool to finish Pure node-prep rollout
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubeconfig={{ site_a_kubeconfig_file | quote }}
+        retries={{ portworx_pure_wait_mcp_retries | int }}
+        delay={{ portworx_pure_wait_mcp_delay | int }}
+
+        for i in $(seq 1 "$retries"); do
+          echo "# Site-A MCP master check ${i}/${retries}"
+          oc --kubeconfig "$kubeconfig" get mcp master
+          conditions=$(oc --kubeconfig "$kubeconfig" get mcp master -o 'jsonpath={range .status.conditions[*]}{.type}={.status}{" "}{end}')
+          echo "conditions: ${conditions}"
+
+          if [[ "$conditions" == *"Updated=True"* ]] && \
+             [[ "$conditions" == *"Updating=False"* ]] && \
+             [[ "$conditions" == *"Degraded=False"* ]]; then
+            echo "Site-A master MCP is healthy."
+            exit 0
+          fi
+
+          sleep "$delay"
+        done
+
+        echo "ERROR: Site-A master MCP did not become healthy in time." >&2
+        echo
+        echo '# Site-A MCP describe'
+        oc --kubeconfig "$kubeconfig" describe mcp master || true
+        echo
+        echo '# Site-A nodes'
+        oc --kubeconfig "$kubeconfig" get nodes -o wide || true
+        echo
+        echo '# Site-A machine-config-daemon pods'
+        oc --kubeconfig "$kubeconfig" -n openshift-machine-config-operator get pods -o wide || true
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Wait for Site-B master MachineConfigPool to finish Pure node-prep rollout
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubeconfig={{ site_b_kubeconfig_file | quote }}
+        retries={{ portworx_pure_wait_mcp_retries | int }}
+        delay={{ portworx_pure_wait_mcp_delay | int }}
+
+        for i in $(seq 1 "$retries"); do
+          echo "# Site-B MCP master check ${i}/${retries}"
+          oc --kubeconfig "$kubeconfig" get mcp master
+          conditions=$(oc --kubeconfig "$kubeconfig" get mcp master -o 'jsonpath={range .status.conditions[*]}{.type}={.status}{" "}{end}')
+          echo "conditions: ${conditions}"
+
+          if [[ "$conditions" == *"Updated=True"* ]] && \
+             [[ "$conditions" == *"Updating=False"* ]] && \
+             [[ "$conditions" == *"Degraded=False"* ]]; then
+            echo "Site-B master MCP is healthy."
+            exit 0
+          fi
+
+          sleep "$delay"
+        done
+
+        echo "ERROR: Site-B master MCP did not become healthy in time." >&2
+        echo
+        echo '# Site-B MCP describe'
+        oc --kubeconfig "$kubeconfig" describe mcp master || true
+        echo
+        echo '# Site-B nodes'
+        oc --kubeconfig "$kubeconfig" get nodes -o wide || true
+        echo
+        echo '# Site-B machine-config-daemon pods'
+        oc --kubeconfig "$kubeconfig" -n openshift-machine-config-operator get pods -o wide || true
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Show final MCP/node status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Site-A MCPs'
+        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get mcp
+        echo
+        echo '# Site-A nodes'
+        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get nodes -o wide
+        echo
+        echo '# Site-B MCPs'
+        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get mcp
+        echo
+        echo '# Site-B nodes'
+        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get nodes -o wide
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: portworx_pure_node_prep_wait_status
+
+    - name: Print final MCP/node status
+      ansible.builtin.debug:
+        var: portworx_pure_node_prep_wait_status.stdout_lines

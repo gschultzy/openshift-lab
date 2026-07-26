@@ -1,0 +1,53 @@
+{% if portworx_pure_apply_operator | default(true) | bool %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: portworx-operator
+  namespace: {{ portworx_pure_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Portworx Pure FlashArray
+    policy.open-cluster-management.io/categories: Operator Install
+    policy.open-cluster-management.io/controls: Install Portworx Operator
+spec:
+  remediationAction: {{ portworx_pure_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: portworx-operator
+        spec:
+          remediationAction: {{ portworx_pure_policy_remediation_action }}
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ portworx_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: {{ portworx_operatorgroup_name }}
+                  namespace: {{ portworx_namespace }}
+                spec:
+                  targetNamespaces:
+                    - {{ portworx_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: {{ portworx_subscription_name }}
+                  namespace: {{ portworx_namespace }}
+                spec:
+                  channel: {{ portworx_operator_channel }}
+                  installPlanApproval: Automatic
+                  name: {{ portworx_operator_package_name }}
+                  source: {{ portworx_operator_source }}
+                  sourceNamespace: {{ portworx_operator_source_namespace }}
+{% endif %}

@@ -1,0 +1,38 @@
+# SOURCE: https://install.portworx.com/3.6?operator=true&mc=false&kbver=1.34.8&ns=portworx&b=true&iop=6&s=%22size%3D150%22&j=size%3D3&pureSanType=FC&ce=pure&dmthin=true&small_conf=1&r=17001&c=px-cluster-f7362041-c55e-4fcc-8213-77dfb097bbc1&osft=true&stork=true&csi=true&mon=true&aut=false&tel=true&st=k8s
+kind: StorageCluster
+apiVersion: core.libopenstorage.org/v1
+metadata:
+  name: px-cluster-f7362041-c55e-4fcc-8213-77dfb097bbc1
+  namespace: portworx
+  annotations:
+    portworx.io/install-source: "https://install.portworx.com/3.6?operator=true&mc=false&kbver=1.34.8&ns=portworx&b=true&iop=6&s=%22size%3D150%22&j=size%3D3&pureSanType=FC&ce=pure&dmthin=true&small_conf=1&r=17001&c=px-cluster-f7362041-c55e-4fcc-8213-77dfb097bbc1&osft=true&stork=true&csi=true&mon=true&aut=false&tel=true&st=k8s"
+    portworx.io/is-openshift: "true"
+    portworx.io/misc-args: "-rt_opts small_conf=1 -T px-storev2 "
+    portworx.io/preflight-check: "true"
+spec:
+  image: docker.io/portworx/oci-monitor:3.6.1
+  imagePullPolicy: Always
+  kvdb:
+    internal: true
+  cloudStorage:
+    deviceSpecs:
+    - size=2000
+    journalDeviceSpec: size=3
+  secretsProvider: k8s
+  startPort: 17001
+  stork:
+    enabled: true
+    args:
+      webhook-controller: "true"
+  runtimeOptions:
+    default-io-profile: "6"
+  csi:
+    enabled: true
+  monitoring:
+    telemetry:
+      enabled: true
+    prometheus:
+      exportMetrics: true
+  env:
+  - name: PURE_FLASHARRAY_SAN_TYPE
+    value: "FC"

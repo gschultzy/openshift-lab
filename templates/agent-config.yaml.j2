@@ -1,0 +1,52 @@
+apiVersion: v1alpha1
+kind: AgentConfig
+metadata:
+  name: {{ cluster_name }}
+rendezvousIP: {{ sno_node.ip }}
+hosts:
+  - hostname: {{ sno_node.hostname }}
+    role: master
+    interfaces:
+      - name: {{ sno_node.primary_interface }}
+        macAddress: {{ sno_node.mac_eth0 }}
+{% if sno_node.secondary_nic_enabled | default(false) | bool %}
+      - name: {{ sno_node.secondary_interface }}
+        macAddress: {{ sno_node.mac_eth1 }}
+{% endif %}
+    networkConfig:
+      interfaces:
+        - name: {{ sno_node.primary_interface }}
+          type: ethernet
+          state: up
+          mac-address: {{ sno_node.mac_eth0 }}
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+              - ip: {{ sno_node.ip }}
+                prefix-length: {{ machine_cidr_prefix }}
+          ipv6:
+            enabled: false
+{% if sno_node.secondary_nic_enabled | default(false) | bool %}
+        - name: {{ sno_node.secondary_interface }}
+          type: ethernet
+          state: up
+          mac-address: {{ sno_node.mac_eth1 }}
+          ipv4:
+            enabled: false
+            dhcp: false
+          ipv6:
+            enabled: false
+{% endif %}
+      dns-resolver:
+        config:
+          server:
+{% for dns_server in dns_servers %}
+            - {{ dns_server }}
+{% endfor %}
+      routes:
+        config:
+          - destination: 0.0.0.0/0
+            next-hop-address: {{ gateway }}
+            next-hop-interface: {{ sno_node.primary_interface }}
+            table-id: 254

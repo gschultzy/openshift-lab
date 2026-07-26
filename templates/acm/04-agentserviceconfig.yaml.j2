@@ -1,0 +1,32 @@
+apiVersion: agent-install.openshift.io/v1beta1
+kind: AgentServiceConfig
+metadata:
+  name: agent
+spec:
+  databaseStorage:
+    accessModes:
+      - ReadWriteOnce
+{% if assisted_service_storage_class | length > 0 %}
+    storageClassName: {{ assisted_service_storage_class }}
+{% endif %}
+    resources:
+      requests:
+        storage: {{ assisted_service_database_storage }}
+  filesystemStorage:
+    accessModes:
+      - ReadWriteOnce
+{% if assisted_service_storage_class | length > 0 %}
+    storageClassName: {{ assisted_service_storage_class }}
+{% endif %}
+    resources:
+      requests:
+        storage: {{ assisted_service_filesystem_storage }}
+  imageStorage:
+    accessModes:
+      - ReadWriteOnce
+{% if assisted_service_storage_class | length > 0 %}
+    storageClassName: {{ assisted_service_storage_class }}
+{% endif %}
+    resources:
+      requests:
+        storage: {{ assisted_service_image_storage }}

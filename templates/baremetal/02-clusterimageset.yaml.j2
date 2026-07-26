@@ -1,0 +1,6 @@
+apiVersion: hive.openshift.io/v1
+kind: ClusterImageSet
+metadata:
+  name: {{ bm_cluster_image_set_name }}
+spec:
+  releaseImage: {{ bm_cluster_release_image }}

@@ -1,0 +1,65 @@
+{% for node in bm_nodes if node.enabled | default(true) %}
+---
+apiVersion: agent-install.openshift.io/v1beta1
+kind: NMStateConfig
+metadata:
+  name: {{ node.name }}
+  namespace: {{ bm_cluster_name }}
+  labels:
+    infraenvs.agent-install.openshift.io: {{ bm_cluster_name }}
+spec:
+  interfaces:
+    - name: {{ node.primary_interface }}
+      macAddress: {{ node.boot_mac }}
+  config:
+    interfaces:
+      - name: {{ node.primary_interface }}
+        type: ethernet
+        state: up
+        mac-address: {{ node.boot_mac }}
+        ipv4:
+          enabled: true
+          dhcp: false
+          address:
+            - ip: {{ node.ip }}
+              prefix-length: {{ bm_machine_cidr_prefix }}
+        ipv6:
+          enabled: false
+{% if node.secondary_interface is defined and node.secondary_interface | length > 0 and (bm_disable_secondary_interfaces | default(true) | bool) %}
+      # Keep the non-install NIC quiet during Assisted Installer discovery.
+      # This prevents DHCP on the second 25G port from adding another IP/default route.
+      - name: {{ node.secondary_interface }}
+        type: ethernet
+        state: down
+{% if node.secondary_mac is defined and node.secondary_mac | length > 0 %}
+        mac-address: {{ node.secondary_mac }}
+{% endif %}
+        ipv4:
+          enabled: false
+          dhcp: false
+        ipv6:
+          enabled: false
+{% elif node.secondary_interface is defined and node.secondary_mac is defined and node.secondary_mac | length > 0 %}
+      - name: {{ node.secondary_interface }}
+        type: ethernet
+        state: up
+        mac-address: {{ node.secondary_mac }}
+        ipv4:
+          enabled: false
+          dhcp: false
+        ipv6:
+          enabled: false
+{% endif %}
+    dns-resolver:
+      config:
+        server:
+{% for dns in bm_dns_servers %}
+          - {{ dns }}
+{% endfor %}
+    routes:
+      config:
+        - destination: 0.0.0.0/0
+          next-hop-address: {{ bm_gateway }}
+          next-hop-interface: {{ node.primary_interface }}
+          table-id: 254
+{% endfor %}

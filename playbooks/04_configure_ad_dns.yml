@@ -1,0 +1,13 @@
+---
+- name: Configure AD DNS records for OpenShift SNO
+  hosts: windows_dns
+  gather_facts: false
+  tasks:
+    - name: Create or update AD DNS A records
+      community.windows.win_dns_record:
+        name: "{{ item.name }}"
+        type: "{{ item.type }}"
+        value: "{{ item.value }}"
+        zone: "{{ ad_dns_zone }}"
+        state: present
+      loop: "{{ ad_dns_records }}"

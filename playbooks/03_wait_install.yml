@@ -1,0 +1,183 @@
+---
+- name: Wait for OpenShift Agent install to complete
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+
+    - name: Check if existing hub cluster is already reachable
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [ ! -s "{{ hub_kubeconfig }}" ]; then
+          exit 1
+        fi
+        oc --kubeconfig "{{ hub_kubeconfig }}" get nodes >/dev/null
+        oc --kubeconfig "{{ hub_kubeconfig }}" get clusterversion version >/dev/null
+      args:
+        executable: /bin/bash
+      register: existing_hub_cluster
+      changed_when: false
+      failed_when: false
+
+    - name: Skip this hub install playbook when hub is already running
+      ansible.builtin.debug:
+        msg:
+          - "Hub SNO is already reachable and running. Skipping this install step."
+          - "Set FORCE_REBUILD_HUB=true in the environment or pass -e sno_force_rebuild=true if you really want to rebuild/re-run install."
+      when:
+        - existing_hub_cluster.rc == 0
+        - not (sno_force_rebuild | default(false) | bool)
+        - (lookup('ansible.builtin.env', 'FORCE_REBUILD_HUB') | default('false') | lower) not in ['true', '1', 'yes', 'y']
+
+    - name: End play when hub is already running
+      ansible.builtin.meta: end_play
+      when:
+        - existing_hub_cluster.rc == 0
+        - not (sno_force_rebuild | default(false) | bool)
+        - (lookup('ansible.builtin.env', 'FORCE_REBUILD_HUB') | default('false') | lower) not in ['true', '1', 'yes', 'y']
+    - name: Show installer wait command
+      ansible.builtin.debug:
+        msg:
+          - "Install dir: {{ install_dir }}"
+          - "SNO IP: {{ sno_node.ip }}"
+          - "Auto-disconnect Agent ISO after disk write: {{ sno_auto_disconnect_iso_after_disk_write | default(true) | bool }}"
+          - "Use playbooks/03_check_install_status.yml in another terminal for live checks."
+          - "Manual debug command: openshift-install agent wait-for install-complete --dir={{ install_dir }} --log-level=debug"
+
+    - name: Show latest installer log lines before waiting
+      ansible.builtin.shell: |
+        if [ -f "{{ install_dir }}/.openshift_install.log" ]; then
+          tail -n 80 "{{ install_dir }}/.openshift_install.log"
+        else
+          echo "No installer log yet."
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: installer_log_before
+
+    - name: Print latest installer log lines
+      ansible.builtin.debug:
+        var: installer_log_before.stdout_lines
+
+    - name: Start bootstrap wait in the background
+      ansible.builtin.command: >-
+        openshift-install agent wait-for bootstrap-complete
+        --dir={{ install_dir }}
+        --log-level=debug
+      async: "{{ sno_bootstrap_wait_async_timeout_seconds | default(7200) }}"
+      poll: 0
+      register: bootstrap_wait_job
+      changed_when: false
+
+    - name: Watch installer log until RHCOS image write reaches 100 percent
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [ ! -f "{{ install_dir }}/.openshift_install.log" ]; then
+          exit 1
+        fi
+        grep -E "Writing image to disk: 100%|Installation disk writing completed|reboot" "{{ install_dir }}/.openshift_install.log" | tail -n 5
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      register: disk_write_complete_log
+      until: disk_write_complete_log.rc == 0
+      retries: "{{ sno_iso_disconnect_log_retries | default(240) }}"
+      delay: "{{ sno_iso_disconnect_log_delay_seconds | default(15) }}"
+      when: sno_auto_disconnect_iso_after_disk_write | default(true) | bool
+
+    - name: Show disk-write detection result
+      ansible.builtin.debug:
+        msg:
+          - "Detected RHCOS disk write/reboot signal in installer log."
+          - "{{ disk_write_complete_log.stdout_lines | default([]) }}"
+      when:
+        - sno_auto_disconnect_iso_after_disk_write | default(true) | bool
+        - disk_write_complete_log is defined
+        - disk_write_complete_log.rc == 0
+
+    - name: Best-effort disconnect Agent ISO from SNO VM after disk write
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/disconnect-vm-cdrom.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+          - --datacenter
+          - "{{ vsphere_datacenter }}"
+          - --vm
+          - "{{ sno_vm_name }}"
+          - --insecure
+      register: disconnect_iso_result
+      changed_when: "disconnect_iso_result.rc == 0 and 'Disconnected' in disconnect_iso_result.stdout"
+      failed_when: "(sno_iso_disconnect_fail_on_error | default(false) | bool) and disconnect_iso_result.rc != 0"
+      no_log: "{{ vcenter_no_log | default(false) | bool }}"
+      delegate_to: localhost
+      when:
+        - sno_auto_disconnect_iso_after_disk_write | default(true) | bool
+        - disk_write_complete_log is defined
+        - disk_write_complete_log.rc == 0
+
+    - name: Show Agent ISO disconnect result
+      ansible.builtin.debug:
+        msg:
+          - "Agent ISO disconnect rc={{ disconnect_iso_result.rc | default('n/a') }}"
+          - "stdout: {{ disconnect_iso_result.stdout_lines | default([]) }}"
+          - "stderr: {{ disconnect_iso_result.stderr_lines | default([]) }}"
+          - "If vSphere reports 'Connection control operation failed for disk ide0:0', that is a hot-disconnect limitation for IDE CD-ROMs while the VM is running. The VM is already configured disk-first, so install can continue; detach the ISO after install or during next power-off."
+      when:
+        - disconnect_iso_result is defined
+
+    - name: Set VM boot order to disk first after ISO disconnect attempt
+      community.vmware.vmware_guest_boot_manager:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ sno_vm_name }}"
+        boot_order:
+          - disk
+          - cdrom
+        boot_delay: 5000
+      delegate_to: localhost
+      failed_when: false
+      when:
+        - sno_set_boot_disk_first_after_iso_disconnect | default(true) | bool
+        - disk_write_complete_log is defined
+        - disk_write_complete_log.rc == 0
+
+    - name: Wait for bootstrap wait process to finish
+      ansible.builtin.async_status:
+        jid: "{{ bootstrap_wait_job.ansible_job_id }}"
+      register: bootstrap_wait
+      until: bootstrap_wait.finished
+      retries: "{{ sno_bootstrap_wait_poll_retries | default(240) }}"
+      delay: "{{ sno_bootstrap_wait_poll_delay_seconds | default(30) }}"
+      failed_when: bootstrap_wait.finished and (bootstrap_wait.rc | default(0)) != 0
+
+    - name: Wait for install to complete
+      ansible.builtin.command: >-
+        openshift-install agent wait-for install-complete
+        --dir={{ install_dir }}
+        --log-level=debug
+      register: install_wait
+      changed_when: false
+
+    - name: Show kubeadmin password path
+      ansible.builtin.debug:
+        msg:
+          - "Kubeconfig: {{ install_dir }}/auth/kubeconfig"
+          - "Kubeadmin password: {{ install_dir }}/auth/kubeadmin-password"
+
+    - name: Validate cluster access
+      ansible.builtin.command: >-
+        oc --kubeconfig={{ install_dir }}/auth/kubeconfig get clusterversion
+      changed_when: false
+      register: cv
+
+    - name: Show cluster version
+      ansible.builtin.debug:
+        var: cv.stdout_lines

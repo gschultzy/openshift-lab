@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hcp-pxe-boot
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: pxd.portworx.com
+parameters:
+  priority_io: "high"
+  repl: "2"
+  nodiscard: "true" # Disables discard operations on the block device to help avoid known compatibility issues on OpenShift Container Platform (OCP) versions 4.18 and earlier.
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

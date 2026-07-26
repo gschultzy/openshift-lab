@@ -1,0 +1,147 @@
+---
+- name: Install LVM Storage on Site-A for HCP/KubeVirt storage
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hub_kubeconfig_stat.stat.exists
+
+    - name: Ensure Site-A kubeconfig output directory exists
+      ansible.builtin.file:
+        path: "{{ site_a_kubeconfig_file | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Extract Site-A admin kubeconfig from RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
+        chmod 0600 {{ site_a_kubeconfig_file }}
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ hub_kubeconfig }}"
+      changed_when: true
+
+    - name: Show Site-A nodes and block devices before LVM install
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Site-A nodes'
+        oc --kubeconfig {{ site_a_kubeconfig_file }} get nodes -o wide
+        echo
+        echo '# Site-A StorageClasses before install'
+        oc --kubeconfig {{ site_a_kubeconfig_file }} get sc || true
+        echo
+        echo '# Block devices per node'
+        for n in $(oc --kubeconfig {{ site_a_kubeconfig_file }} get nodes -o name); do
+          echo
+          echo "## $n"
+          oc --kubeconfig {{ site_a_kubeconfig_file }} debug "$n" -- chroot /host bash -lc 'lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL' || true
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: site_a_lvm_precheck
+
+    - name: Print Site-A storage precheck
+      ansible.builtin.debug:
+        var: site_a_lvm_precheck.stdout_lines
+
+    - name: Stop if no explicit device paths are configured and all-unused mode is not allowed
+      ansible.builtin.fail:
+        msg: >-
+          site_a_lvm_device_paths is empty. Set it in inventories/pod22/group_vars/all/main.yml, for example ['/dev/sdb'],
+          after checking the lsblk output above. Or set site_a_lvm_allow_all_unused_devices=true if this is a disposable lab and
+          you want LVMS to claim all unused disks automatically.
+      when:
+        - (site_a_lvm_device_paths | default([]) | length) == 0
+        - not (site_a_lvm_allow_all_unused_devices | default(false) | bool)
+
+    - name: Apply LVM Operator namespace/operator/subscription on Site-A
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cat <<'EOF_MANIFEST' | oc --kubeconfig {{ site_a_kubeconfig_file }} apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: {{ site_a_lvm_namespace }}
+        ---
+        apiVersion: operators.coreos.com/v1
+        kind: OperatorGroup
+        metadata:
+          name: openshift-storage-operatorgroup
+          namespace: {{ site_a_lvm_namespace }}
+        ---
+        apiVersion: operators.coreos.com/v1alpha1
+        kind: Subscription
+        metadata:
+          name: lvms-operator
+          namespace: {{ site_a_lvm_namespace }}
+        spec:
+          channel: {{ site_a_lvm_subscription_channel }}
+          installPlanApproval: {{ site_a_lvm_install_plan_approval }}
+          name: lvms-operator
+          source: {{ site_a_lvm_operator_source }}
+          sourceNamespace: {{ site_a_lvm_operator_source_namespace }}
+        EOF_MANIFEST
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Wait for LVMCluster CRD on Site-A
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ site_a_kubeconfig_file }} wait --for=condition=Established crd/lvmclusters.lvm.topolvm.io --timeout=20m
+      changed_when: false
+
+    - name: Apply LVMCluster on Site-A
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/site-a-lvm/lvmcluster.yaml.j2"
+        dest: "{{ build_root }}/site-a-lvmcluster.yaml"
+        mode: "0644"
+
+    - name: Create/update Site-A LVMCluster
+      ansible.builtin.command: oc --kubeconfig {{ site_a_kubeconfig_file }} apply -f {{ build_root }}/site-a-lvmcluster.yaml
+      changed_when: true
+
+    - name: Wait for Site-A LVM StorageClass
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ site_a_kubeconfig_file }} get storageclass {{ site_a_lvm_storage_class_name }}
+      register: wait_site_a_lvm_sc
+      retries: 60
+      delay: 20
+      until: wait_site_a_lvm_sc.rc == 0
+      changed_when: false
+
+    - name: Make Site-A LVM StorageClass default when requested
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ "{{ site_a_lvm_make_default_storageclass | default(true) | bool }}" = "True" ]; then
+          for sc in $(oc --kubeconfig {{ site_a_kubeconfig_file }} get sc -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+            oc --kubeconfig {{ site_a_kubeconfig_file }} annotate sc "$sc" storageclass.kubernetes.io/is-default-class- storageclass.beta.kubernetes.io/is-default-class- --overwrite || true
+          done
+          oc --kubeconfig {{ site_a_kubeconfig_file }} annotate sc {{ site_a_lvm_storage_class_name }} storageclass.kubernetes.io/is-default-class=true --overwrite
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Show final Site-A storage status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc --kubeconfig {{ site_a_kubeconfig_file }} get sc
+        oc --kubeconfig {{ site_a_kubeconfig_file }} -n {{ site_a_lvm_namespace }} get lvmcluster,pods
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: site_a_lvm_final_status
+
+    - name: Print final Site-A storage status
+      ansible.builtin.debug:
+        var: site_a_lvm_final_status.stdout_lines

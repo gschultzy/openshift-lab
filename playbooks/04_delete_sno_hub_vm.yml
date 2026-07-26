@@ -1,0 +1,36 @@
+---
+- name: Delete SNO hub VM from vSphere
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+    - name: Require explicit confirmation
+      ansible.builtin.assert:
+        that:
+          - confirm_delete_hub | default(false) | bool
+        fail_msg: >-
+          Refusing to delete the hub VM without confirmation. Run through
+          scripts/hub-delete.sh or pass -e confirm_delete_hub=true.
+
+    - name: Power off SNO hub VM if present
+      community.vmware.vmware_guest_powerstate:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ sno_vm_name }}"
+        state: powered-off
+      failed_when: false
+      delegate_to: localhost
+
+    - name: Delete SNO hub VM
+      community.vmware.vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ vsphere_datacenter }}"
+        folder: "{{ vsphere_folder }}"
+        name: "{{ sno_vm_name }}"
+        state: absent
+        force: true
+      delegate_to: localhost

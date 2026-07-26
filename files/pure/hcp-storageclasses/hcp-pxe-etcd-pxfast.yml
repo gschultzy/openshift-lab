@@ -1,0 +1,10 @@
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: hcp-pxe-etcd-pxfast
+provisioner: pxd.portworx.com
+parameters:
+  priority_io: "high"
+  repl: "1"
+  fastpath: "true"
+allowVolumeExpansion: true

@@ -1,0 +1,42 @@
+---
+- name: Disconnect Agent ISO from SNO VM and set disk-first boot
+  hosts: ansible_controller
+  gather_facts: false
+  tasks:
+    - name: Disconnect all CD-ROM devices from SNO VM
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../scripts/disconnect-vm-cdrom.py"
+          - --hostname
+          - "{{ vcenter_hostname }}"
+          - --username
+          - "{{ vcenter_username }}"
+          - --password
+          - "{{ vcenter_password }}"
+          - --datacenter
+          - "{{ vsphere_datacenter }}"
+          - --vm
+          - "{{ sno_vm_name }}"
+          - --insecure
+      register: disconnect_iso_result
+      changed_when: "'Disconnected' in disconnect_iso_result.stdout"
+      no_log: true
+      delegate_to: localhost
+
+    - name: Show ISO disconnect result
+      ansible.builtin.debug:
+        msg: "Agent ISO/CD-ROM disconnected from {{ sno_vm_name }}."
+
+    - name: Set VM boot order to disk first
+      community.vmware.vmware_guest_boot_manager:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: "{{ validate_certs }}"
+        name: "{{ sno_vm_name }}"
+        boot_order:
+          - disk
+          - cdrom
+        boot_delay: 5000
+      when: sno_set_boot_disk_first_after_iso_disconnect | default(true) | bool
+      delegate_to: localhost

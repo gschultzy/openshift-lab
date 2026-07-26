@@ -1,0 +1,106 @@
+---
+- name: Render and apply ACM Assisted Installer resources for the bare-metal cluster
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+
+    - name: Wait for ACM/Hive/Assisted/BareMetal CRDs used by {{ bm_cluster_display_name | default(bm_cluster_name) }}
+      ansible.builtin.command: "oc get crd {{ item }}"
+      register: required_crd
+      changed_when: false
+      retries: 120
+      delay: 15
+      until: required_crd.rc == 0
+      loop:
+        - clusterdeployments.hive.openshift.io
+        - clusterimagesets.hive.openshift.io
+        - agentclusterinstalls.extensions.hive.openshift.io
+        - infraenvs.agent-install.openshift.io
+        - nmstateconfigs.agent-install.openshift.io
+        - baremetalhosts.metal3.io
+        - managedclusters.cluster.open-cluster-management.io
+        - klusterletaddonconfigs.agent.open-cluster-management.io
+
+    - name: Show {{ bm_cluster_display_name | default(bm_cluster_name) }} bare-metal node plan
+      ansible.builtin.debug:
+        msg:
+          - "Cluster: {{ bm_cluster_name }} / display {{ bm_cluster_display_name | default(bm_cluster_name) }}"
+          - "Control-plane nodes: {{ bm_nodes | selectattr('enabled', 'equalto', true) | selectattr('role', 'equalto', 'master') | map(attribute='name') | list }}"
+          - "Worker nodes: {{ bm_nodes | selectattr('enabled', 'equalto', true) | selectattr('role', 'equalto', 'worker') | map(attribute='name') | list }}"
+          - "API VIP: {{ bm_api_vip }}"
+          - "Ingress VIP: {{ bm_ingress_vip }}"
+
+    - name: Validate bare-metal control-plane and worker counts
+      ansible.builtin.assert:
+        that:
+          - (bm_nodes | selectattr('enabled', 'equalto', true) | selectattr('role', 'equalto', 'master') | list | length) == bm_control_plane_count
+          - (bm_nodes | selectattr('enabled', 'equalto', true) | selectattr('role', 'equalto', 'worker') | list | length) == bm_worker_count
+        fail_msg: "bm_control_plane_count / bm_worker_count must match enabled bm_nodes by role."
+
+    - name: Validate bare-metal boot MACs are set
+      ansible.builtin.assert:
+        that:
+          - item.boot_mac is not search('CHANGE_ME')
+        fail_msg: "{{ item.name }} still has a placeholder boot_mac. Set the real NIC MAC cabled to VLAN 3522."
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Create rendered bare-metal manifest directory
+      ansible.builtin.file:
+        path: "{{ bm_rendered_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Render bare-metal cluster manifests
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/baremetal/{{ item }}"
+        dest: "{{ bm_rendered_dir }}/{{ item | regex_replace('\\.j2$', '') }}"
+        mode: '0600'
+      loop:
+        - 00-namespace.yaml.j2
+        - 01-pull-secret.yaml.j2
+        - 02-clusterimageset.yaml.j2
+        - 03-managedcluster.yaml.j2
+        - 04-klusterletaddonconfig.yaml.j2
+        - 05-clusterdeployment.yaml.j2
+        - 06-agentclusterinstall.yaml.j2
+        - 07-infraenv.yaml.j2
+        - 08-nmstateconfigs.yaml.j2
+        - 09-bmc-secrets.yaml.j2
+        - 10-baremetalhosts.yaml.j2
+        - 11-clustersetbinding.yaml.j2
+
+    - name: Apply bare-metal manifests in safe order
+      ansible.builtin.command: "oc apply -f {{ bm_rendered_dir }}/{{ item }}"
+      changed_when: true
+      loop:
+        - 00-namespace.yaml
+        - 02-clusterimageset.yaml
+        - 11-clustersetbinding.yaml
+        - 01-pull-secret.yaml
+        - 03-managedcluster.yaml
+        - 04-klusterletaddonconfig.yaml
+        - 05-clusterdeployment.yaml
+        - 06-agentclusterinstall.yaml
+        - 07-infraenv.yaml
+        - 08-nmstateconfigs.yaml
+        - 09-bmc-secrets.yaml
+        - 10-baremetalhosts.yaml
+
+    - name: Wait for InfraEnv ISO URL to be generated
+      ansible.builtin.command: >-
+        oc -n {{ bm_cluster_name }} get infraenv {{ bm_cluster_name }}
+        -o jsonpath='{.status.isoDownloadURL}'
+      register: infraenv_iso
+      changed_when: false
+      retries: 60
+      delay: 20
+      until: infraenv_iso.stdout | length > 0
+
+    - name: Show InfraEnv ISO URL status
+      ansible.builtin.debug:
+        msg:
+          - "InfraEnv ISO is ready. ACM/BMO should now mount it by Redfish virtual media through each BareMetalHost."
+          - "Namespace: {{ bm_cluster_name }}"

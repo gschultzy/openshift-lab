@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
 if [[ ! -f "$HUB_KUBECONFIG" ]]; then
@@ -14,10 +14,10 @@ fi
 ./scripts/ensure-hub-kubeconfig.sh >/dev/null 2>&1 || true
 
 api_server="$(oc --kubeconfig "$HUB_KUBECONFIG" whoami --show-server)"
-if [[ "$api_server" != *"api.hub-sno.poc.local"* ]]; then
-  echo "Refusing to repair Portworx policy bindings because this does not look like hub-sno." >&2
+if [[ "$api_server" != *"api.lab-sno.poc.local"* ]]; then
+  echo "Refusing to repair Portworx policy bindings because this does not look like lab-sno." >&2
   echo "Current API server: $api_server" >&2
-  echo "Expected: api.hub-sno.poc.local" >&2
+  echo "Expected: api.lab-sno.poc.local" >&2
   exit 1
 fi
 

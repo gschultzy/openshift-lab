@@ -3,7 +3,7 @@
 This lab has one supported HCP lifecycle:
 
 ```text
-hub-sno = RHACM + MCE
+lab-sno = RHACM + MCE
 site-a  = RHACM managed hosting cluster
 site-b  = RHACM managed hosting cluster
 ```
@@ -57,11 +57,11 @@ The `*-t1-px` tenants get three extra disks on `hcp-fada-data` for tenant Portwo
 ## Checks
 
 ```bash
-oc --kubeconfig build/hub-sno/install/auth/kubeconfig get managedcluster
-oc --kubeconfig build/hub-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/hub-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/lab-sno/install/auth/kubeconfig get managedcluster
+oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
 
-for k in build/hub-sno/hcp-kubeconfigs/*.kubeconfig; do
+for k in build/lab-sno/hcp-kubeconfigs/*.kubeconfig; do
   echo "### $k"
   oc --kubeconfig "$k" get clusterversion,nodes
 fi

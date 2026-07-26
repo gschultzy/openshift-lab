@@ -10,7 +10,7 @@
 
     - name: Stop if hub kubeconfig is missing
       ansible.builtin.fail:
-        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Set HUB_KUBECONFIG to the hub-sno kubeconfig or complete the hub install first."
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Set HUB_KUBECONFIG to the lab-sno kubeconfig or complete the hub install first."
       when: not hub_kubeconfig_stat.stat.exists
 
     - name: Read current API server and managed clusters from supplied kubeconfig
@@ -41,7 +41,7 @@
       changed_when: false
       register: hub_api_server
 
-    - name: Stop if kubeconfig points at a spoke instead of hub-sno
+    - name: Stop if kubeconfig points at a spoke instead of lab-sno
       ansible.builtin.fail:
         msg: |
           This kubeconfig is not pointing at the RHACM hub.
@@ -91,8 +91,8 @@
           Re-apply the bare-metal cluster manifests from the hub context first:
 
             export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
-            ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
-            ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_site_b_baremetal_cluster.yml --ask-vault-pass
+            ansible-playbook -i inventories/env/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
+            ansible-playbook -i inventories/env/hosts.yml playbooks/08_apply_site_b_baremetal_cluster.yml --ask-vault-pass
 
           Then rerun:
 

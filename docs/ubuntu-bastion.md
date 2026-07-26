@@ -1,13 +1,13 @@
 # Ubuntu 24.04.4 LTS bastion requirements
 
-This repo assumes the automation runs from the Ubuntu bastion VM, `RedHat-VM01`, at `10.23.22.12`.
+This repo assumes the automation runs from the Ubuntu bastion VM, `RedHat-VM01`, at `10.23.74.12`.
 
 The Ubuntu bastion is the Ansible control node. It needs network reachability to:
 
-- vCenter: `10.23.22.10`
-- ESXi host through vCenter inventory: `10.23.22.11`
-- AD DNS server, if DNS automation is used: `10.23.22.100`
-- iDRAC/BMC addresses: `10.23.22.80-85`
+- vCenter: `10.23.74.10`
+- ESXi host through vCenter inventory: `10.23.74.11`
+- AD DNS server, if DNS automation is used: `10.23.74.100`
+- iDRAC/BMC addresses: `10.23.74.81-85`
 - OpenShift hub/spoke API and ingress VIPs
 - Red Hat and OpenShift image registries, unless this is later converted to a disconnected workflow
 
@@ -101,15 +101,15 @@ source .venv/bin/activate
 Then run the normal flow:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
 ./scripts/run-full-hub-and-spoke.sh
 ```
 
 ## Notes
 
-- Keep `inventories/pod22/group_vars/all/vault.yml` encrypted with Ansible Vault.
+- Keep `inventories/env/group_vars/all/vault.yml` encrypted with Ansible Vault.
 - Do not commit `.venv/`, generated ISOs, kubeconfigs, pull secrets, or the `build/` directory.
-- If the Ubuntu VM uses a proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` before running the bootstrap and playbooks. Include `10.23.22.0/24`, `.poc.local`, vCenter, iDRACs, and the OpenShift API VIPs in `NO_PROXY`.
+- If the Ubuntu VM uses a proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` before running the bootstrap and playbooks. Include `10.23.74.0/24`, `.poc.local`, vCenter, iDRACs, and the OpenShift API VIPs in `NO_PROXY`.
 
 
 ## Ansible callback compatibility

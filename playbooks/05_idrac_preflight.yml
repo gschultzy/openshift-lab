@@ -7,9 +7,50 @@
       ansible.builtin.assert:
         that:
           - item.boot_mac is not search('CHANGE_ME')
-        fail_msg: "{{ item.name }} still has a placeholder boot_mac. Set the real NIC MAC cabled to VLAN 3522."
+        fail_msg: "{{ item.name }} still has a placeholder boot_mac. Run playbooks/05_discover_idrac_nics.yml to discover the real NIC MAC cabled to VLAN 3574."
       loop: "{{ bm_nodes }}"
       when: item.enabled | default(true)
+
+    - name: Validate bare-metal boot MAC format
+      ansible.builtin.assert:
+        that:
+          - item.boot_mac is match('(?i)^[0-9a-f]{2}(:[0-9a-f]{2}){5}$')
+        fail_msg: "{{ item.name }} boot_mac is not a valid six-byte colon-separated MAC address."
+      loop: "{{ bm_nodes }}"
+      when: item.enabled | default(true)
+
+    - name: Validate enabled nodes have unique boot MACs
+      ansible.builtin.assert:
+        that:
+          - >-
+            (bm_nodes | selectattr('enabled', 'equalto', true) | map(attribute='boot_mac') | list | unique | length)
+            ==
+            (bm_nodes | selectattr('enabled', 'equalto', true) | list | length)
+        fail_msg: "Two or more enabled nodes use the same boot_mac. Each node must use its own live NIC MAC."
+
+    - name: Build enabled bare-metal node list for live MAC validation
+      ansible.builtin.set_fact:
+        bm_enabled_nodes_json: "{{ bm_nodes | selectattr('enabled', 'equalto', true) | list | to_json }}"
+
+    - name: Validate configured boot MACs against live iDRAC NIC inventory
+      ansible.builtin.command:
+        argv:
+          - "{{ repo_root }}/scripts/discover-idrac-nics.py"
+          - --nodes-json
+          - "{{ bm_enabled_nodes_json }}"
+          - --user
+          - "{{ vault_idrac_username }}"
+          - --preferred-port
+          - "{{ idrac_discovery_preferred_port | default('1') | string }}"
+          - --require-current-match
+      environment:
+        IDRAC_PASSWORD: "{{ vault_idrac_password }}"
+      changed_when: false
+      register: idrac_mac_validation
+
+    - name: Show live MAC validation result
+      ansible.builtin.debug:
+        msg: "{{ idrac_mac_validation.stdout_lines }}"
 
     - name: Query iDRAC Manager firmware version
       ansible.builtin.uri:

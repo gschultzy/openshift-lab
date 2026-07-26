@@ -3,7 +3,7 @@
 
 By default this is read-only and prints a compact table. With
 --auto-fill-placeholders and --write-inventory, it also updates placeholder
-boot_mac values like CHANGE_ME_B09_33_BOOT_NIC_MAC in the inventory file.
+boot_mac values like CHANGE_ME_B10_30_BOOT_NIC_MAC in the inventory file.
 
 Selection logic is intentionally conservative:
 - prefer the 25G host NIC named NIC.Integrated.1-1-1 / Integrated Port 1
@@ -228,6 +228,11 @@ def main() -> int:
     ap.add_argument("--auto-fill-placeholders", action="store_true", help="auto-select boot_mac values for CHANGE_ME placeholders")
     ap.add_argument("--write-inventory", help="inventory group_vars/all/main.yml path to update when auto-fill is enabled")
     ap.add_argument("--preferred-port", default="1", help="preferred physical host NIC port, default 1")
+    ap.add_argument(
+        "--require-current-match",
+        action="store_true",
+        help="fail when a non-placeholder configured boot_mac is not present on a link-up host NIC reported by iDRAC",
+    )
     args = ap.parse_args()
 
     password = os.environ.get(args.password_env)
@@ -237,6 +242,7 @@ def main() -> int:
 
     nodes = json.loads(args.nodes_json)
     replacements: list[tuple[str, str, str]] = []
+    validation_errors: list[str] = []
 
     for node in nodes:
         if not node.get("enabled", True):
@@ -248,6 +254,10 @@ def main() -> int:
         recs = collect_for_host(str(node.get("bmc_ip")), args.user, password)
         if not recs:
             print("  No NIC MACs found from Redfish candidate endpoints")
+            if args.require_current_match:
+                validation_errors.append(
+                    f"{node.get('name')}: iDRAC returned no host NIC MAC inventory; cannot validate boot_mac"
+                )
             continue
         print("  Link       Speed     Port/Id                         MAC(s)                         Redfish path/name")
         print("  ---------  --------  ------------------------------  -----------------------------  -----------------")
@@ -260,12 +270,27 @@ def main() -> int:
             print(f"  {link:<9}  {speed:<8}  {port:<30}  {mac:<29}  {name}")
 
         current = str(node.get("boot_mac", "")).upper()
-        matches = [r for r in recs if current and current in r["macs"]]
+        matches = [r for r in recs if current and current in r["macs"] and good_host_macs(r)]
+        link_up_matches = [r for r in matches if link_is_up(r)]
         if matches:
             m = matches[0]
             print(f"  MATCH: current boot_mac {current} found on {m.get('name') or m.get('id')} link={m.get('link')} speed={m.get('speed')}")
 
         selected_mac, selected_record, reason = select_boot_mac(recs, args.preferred_port)
+
+        if args.require_current_match and not is_placeholder(current):
+            if not link_up_matches:
+                msg = (
+                    f"{node.get('name')}: configured boot_mac {current} was not found on a link-up "
+                    "host NIC in the live iDRAC inventory"
+                )
+                validation_errors.append(msg)
+                print(f"  ERROR: {msg}")
+            elif selected_mac and current != selected_mac:
+                print(
+                    f"  WARNING: configured MAC {current} is live, but the preferred Port {args.preferred_port} "
+                    f"candidate is {selected_mac}. Verify cabling before provisioning."
+                )
         if selected_mac:
             print(
                 f"  AUTO-CANDIDATE: {selected_mac}  # {reason}; "
@@ -284,7 +309,10 @@ def main() -> int:
                 replacements.append((str(node.get("name")), str(node.get("boot_mac", "")), selected_mac))
                 print(f"  AUTO-FILL: will set {node.get('name')} boot_mac to {selected_mac}")
             else:
-                print(f"  AUTO-FILL: could not safely select a boot_mac for {node.get('name')}: {reason}")
+                msg = f"{node.get('name')}: could not safely select a boot_mac: {reason}"
+                print(f"  AUTO-FILL: {msg}")
+                if args.require_current_match:
+                    validation_errors.append(msg)
 
     if args.auto_fill_placeholders:
         if not args.write_inventory:
@@ -302,6 +330,12 @@ def main() -> int:
                 return 1
         else:
             print("\nNO_INVENTORY_CHANGE: no placeholder boot_mac values needed updating")
+
+    if validation_errors:
+        print("\nMAC_VALIDATION_FAILED:", file=sys.stderr)
+        for error in validation_errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 1
 
     print("\n# NOTE: iDRAC can tell you the hardware MAC/link state, but not always the RHCOS Linux interface name.")
     print("# For these R6525 Broadcom ports it is commonly eno33np0 for Integrated NIC 1 Port 1.")

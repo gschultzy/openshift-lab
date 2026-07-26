@@ -50,5 +50,5 @@
         msg:
           - "Set vsphere_datacenter to one of: {{ vsphere_inventory.datacenters | map(attribute='name') | list }}"
           - "Set vsphere_folder to: /<your_datacenter>/vm"
-          - "Set vsphere_esxi_hostname to the host name exactly as shown above. It may be an FQDN, not 10.23.22.11."
+          - "Set vsphere_esxi_hostname to the host name exactly as shown above. It may be an FQDN, not 10.23.74.11."
           - "Set vm_network_eth0/vm_network_eth1 to port group names exactly as shown above."

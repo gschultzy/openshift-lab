@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
-SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$PWD/build/hub-sno/site-a/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$PWD/build/lab-sno/site-a/auth/kubeconfig}"
 HCP_NAME="${SITE_A_HCP_NAME:-site-a-hcp-t1-px}"
 HCP_NS="${SITE_A_HCP_NAMESPACE:-clusters}"
 IMPORT_NAME="${SITE_A_HCP_IMPORT_NAME:-${HCP_NAME}}"
@@ -34,8 +34,8 @@ echo "Site-A API: $SITEA_SERVER"
 echo "HCP:        $HCP_NS/$HCP_NAME"
 echo
 
-if [[ "$HUB_SERVER" != *"hub-sno"* ]]; then
-  echo "Refusing to continue: HUB_KUBECONFIG does not look like hub-sno." >&2
+if [[ "$HUB_SERVER" != *"lab-sno"* ]]; then
+  echo "Refusing to continue: HUB_KUBECONFIG does not look like lab-sno." >&2
   exit 1
 fi
 

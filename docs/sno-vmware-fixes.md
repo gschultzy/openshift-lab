@@ -1,6 +1,6 @@
 # SNO VMware fixes for this lab
 
-This repo version is fixed for the current pod-22 VMware SNO hub design.
+This repo version is fixed for the current environment VMware SNO hub design.
 
 ## SNO networking
 
@@ -17,7 +17,7 @@ vm_network_eth0: MGMT
 vm_network_eth1: ""
 ```
 
-Do not attach VLAN522 to the SNO hub. VLAN522 can be used later for other lab hosts or workloads, but the hub itself only needs the VLAN3522 machine network.
+Do not attach VLAN574 to the SNO hub. VLAN574 can be used later for other lab hosts or workloads, but the hub itself only needs the VLAN3574 machine network.
 
 ## vSphere disk UUID
 
@@ -34,9 +34,9 @@ This is done with `scripts/set-vm-advanced-setting.py` through pyVmomi after the
 If an earlier Agent ISO was generated with two NICs, remove the old build state and regenerate:
 
 ```bash
-rm -rf build/hub-sno
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
+rm -rf build/lab-sno
+ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ```
 
 For a full VM recreate, set:
@@ -62,11 +62,11 @@ sno_primary_dvs_name: DSwitch
 sno_primary_portgroup_vlan_id: 0
 ```
 
-Use VLAN ID `0` when the ESXi physical uplink is on an access switchport for VLAN 3522.
-Use VLAN ID `3522` only when the uplink is trunking tagged VLAN 3522.
+Use VLAN ID `0` when the ESXi physical uplink is on an access switchport for VLAN 3574.
+Use VLAN ID `3574` only when the uplink is trunking tagged VLAN 3574.
 
 The VM creation playbook will first try a standard vSwitch. If `vSwitch0` is not present,
-it will create the `VLAN3522` distributed port group on the configured DVS through vCenter.
+it will create the `VLAN3574` distributed port group on the configured DVS through vCenter.
 
 
 ## Second 800 GB disk
@@ -93,7 +93,7 @@ sno_set_boot_disk_first_after_iso_disconnect: true
 A standalone helper is also available:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/03_disconnect_agent_iso.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/03_disconnect_agent_iso.yml --ask-vault-pass
 ```
 
 ## 2026-06-26 update: ISO boot loop prevention and second disk
@@ -105,7 +105,7 @@ The VM is now configured with **disk-first, CD-ROM-fallback** boot order. On fir
 The SNO VM definition includes an optional second 800GB thin disk. For a running VM after install, use:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_add_sno_extra_disk.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_add_sno_extra_disk.yml --ask-vault-pass
 ```
 
 The extra VMDK is only attached. It is not formatted, mounted, or claimed by OpenShift automatically.

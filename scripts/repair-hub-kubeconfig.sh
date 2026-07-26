@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-HUB_CLUSTER_NAME="${HUB_CLUSTER_NAME:-hub-sno}"
+HUB_CLUSTER_NAME="${HUB_CLUSTER_NAME:-lab-sno}"
 HUB_API="${HUB_API:-https://api.${HUB_CLUSTER_NAME}.poc.local:6443}"
 HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/${HUB_CLUSTER_NAME}/install/auth/kubeconfig}"
 KUBEADMIN_PASSWORD_FILE="${KUBEADMIN_PASSWORD_FILE:-$PWD/build/${HUB_CLUSTER_NAME}/install/auth/kubeadmin-password}"
@@ -35,7 +35,7 @@ if [ -f "$HUB_KUBECONFIG" ]; then
   echo "Backed up non-hub kubeconfig to: $backup"
 fi
 
-# First try to find an existing kubeconfig that already points to hub-sno.
+# First try to find an existing kubeconfig that already points to lab-sno.
 while IFS= read -r -d '' candidate; do
   candidate_server="$(server_for "$candidate")"
   if [[ "$candidate_server" == *"api.${HUB_CLUSTER_NAME}.poc.local"* ]]; then

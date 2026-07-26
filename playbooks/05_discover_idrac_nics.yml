@@ -3,8 +3,8 @@
   hosts: ansible_controller
   gather_facts: false
   vars:
-    idrac_discovery_auto_update_inventory: false
-    idrac_discovery_inventory_file: "{{ repo_root }}/inventories/pod22/group_vars/all/main.yml"
+    idrac_discovery_auto_update_inventory: true
+    idrac_discovery_inventory_file: "{{ inventory_dir }}/group_vars/all/main.yml"
     idrac_discovery_preferred_port: "1"
   tasks:
     - name: Build enabled bare-metal node list for NIC discovery
@@ -13,7 +13,7 @@
 
     - name: Build iDRAC NIC discovery command
       ansible.builtin.set_fact:
-        idrac_nic_discovery_argv: "{{ [repo_root ~ '/scripts/discover-idrac-nics.py', '--nodes-json', bm_enabled_nodes_json, '--user', vault_idrac_username, '--preferred-port', idrac_discovery_preferred_port | string] + ((idrac_discovery_auto_update_inventory | bool) | ternary(['--auto-fill-placeholders', '--write-inventory', idrac_discovery_inventory_file], [])) }}"
+        idrac_nic_discovery_argv: "{{ [repo_root ~ '/scripts/discover-idrac-nics.py', '--nodes-json', bm_enabled_nodes_json, '--user', vault_idrac_username, '--preferred-port', idrac_discovery_preferred_port | string] + ((idrac_discovery_auto_update_inventory | bool) | ternary(['--auto-fill-placeholders', '--write-inventory', idrac_discovery_inventory_file], [])) + ((idrac_require_current_mac_match | default(true) | bool) | ternary(['--require-current-match'], [])) }}"
 
     - name: Discover host NIC MACs and link status through iDRAC Redfish
       ansible.builtin.command:
@@ -27,6 +27,11 @@
     - name: Show iDRAC NIC discovery results
       ansible.builtin.debug:
         msg: "{{ idrac_nic_discovery.stdout_lines }}"
+
+    - name: Reload environment variables after MAC auto-fill
+      ansible.builtin.include_vars:
+        file: "{{ idrac_discovery_inventory_file }}"
+      when: "'UPDATED_INVENTORY:' in idrac_nic_discovery.stdout"
 
     - name: Show likely RHCOS interface-name fix for R6525 Broadcom NICs
       ansible.builtin.debug:

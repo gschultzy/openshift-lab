@@ -26,8 +26,8 @@
           - ssh_pub_key is defined
         fail_msg: >-
           Required variables are missing. Check that Ansible is loading
-          inventories/pod22/group_vars/all/main.yml and the encrypted
-          inventories/pod22/group_vars/all/vault.yml file.
+          inventories/env/group_vars/all/main.yml and the encrypted
+          inventories/env/group_vars/all/vault.yml file.
 
     - name: Validate optional vSphere platform variables
       ansible.builtin.assert:
@@ -111,7 +111,7 @@
         fail_msg: >-
           One or more configured vSphere inventory names do not exist exactly as written.
           Run playbooks/00_discover_vsphere_inventory.yml and update
-          inventories/pod22/group_vars/all/main.yml. For this SNO hub, only vm_network_eth0 is required.
+          inventories/env/group_vars/all/main.yml. For this SNO hub, only vm_network_eth0 is required.
 
     - name: Validate optional secondary vSphere inventory name exists
       ansible.builtin.assert:
@@ -135,7 +135,7 @@
           - iso_vsphere_path is defined
         fail_msg: >-
           iso_upload_method is esxi_ssh but ESXi SSH/SCP upload variables are missing.
-          Set vault_esxi_password in inventories/pod22/group_vars/all/vault.yml.
+          Set vault_esxi_password in inventories/env/group_vars/all/vault.yml.
       when: iso_upload_method == 'esxi_ssh'
 
     - name: Check ESXi SSH is reachable for ISO upload

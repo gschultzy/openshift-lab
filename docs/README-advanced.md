@@ -2,7 +2,7 @@
 
 ## SNO networking update: one NIC only
 
-The VMware SNO hub is now configured for a single VM NIC by default. Only `vm_network_eth0` is required, and it should point at the vSphere port group that carries VLAN 3522 / the machine network. The optional secondary NIC is disabled with `sno_node.secondary_nic_enabled: false`, and `vm_network_eth1` can remain blank.
+The VMware SNO hub is now configured for a single VM NIC by default. Only `vm_network_eth0` is required, and it should point at the vSphere port group that carries VLAN 3574 / the machine network. The optional secondary NIC is disabled with `sno_node.secondary_nic_enabled: false`, and `vm_network_eth1` can remain blank.
 
 ```yaml
 sno_node:
@@ -13,7 +13,7 @@ vm_network_eth0: MGMT
 vm_network_eth1: ""
 ```
 
-If your vCenter discovery only shows `MGMT`, and `MGMT` is actually the access network for VLAN 3522 in this lab, set `vm_network_eth0: MGMT`. Do not use `DSwitch-DVUplinks-18` for the SNO VM unless it is intentionally configured as a VM workload port group.
+If your vCenter discovery only shows `MGMT`, and `MGMT` is actually the access network for VLAN 3574 in this lab, set `vm_network_eth0: MGMT`. Do not use `DSwitch-DVUplinks-18` for the SNO VM unless it is intentionally configured as a VM workload port group.
 
 
 This repo bootstraps a Single Node OpenShift (SNO) cluster on VMware vSphere using the OpenShift Agent-based Installer, installs Red Hat Advanced Cluster Management (ACM) on that SNO hub, then uses ACM / multicluster engine / Assisted Installer to build a managed bare-metal OpenShift cluster from Dell PowerEdge nodes.
@@ -24,7 +24,7 @@ The pattern is:
 2. Generate an OpenShift `agent.iso` that contains the static network configuration for the SNO hub.
 3. Upload the ISO to a vSphere datastore.
 4. Create a vSphere VM with one NIC:
-   - `eth0` / `ens192` on the VLAN 3522 machine-network port group
+   - `eth0` / `ens192` on the VLAN 3574 machine-network port group
 5. Attach the ISO, boot the VM, and wait for the OpenShift SNO install to complete.
 6. Install ACM on the SNO hub.
 7. Configure Assisted Service storage on the hub.
@@ -48,52 +48,52 @@ The pattern is:
 
 ```text
 VMware / vSphere
-  └── hub-sno VM
+  └── lab-sno VM
         └── OpenShift SNO
               └── ACM + multicluster engine + Assisted Service
                     └── bm-spoke-01 bare-metal OpenShift cluster
-                          ├── b08-33 master
-                          ├── b08-34 master
-                          ├── b08-35 master
-                          ├── b08-36 worker
-                          ├── b09-33 worker
-                          └── b09-34 worker
+                          ├── b10-30 master
+                          ├── b10-31 master
+                          ├── b10-33 master
+                          ├── b10-34 worker
+                          ├── b10-35 worker
+                          └── b10-36 worker
 ```
 
 See [`docs/hub-spoke-architecture.md`](docs/hub-spoke-architecture.md) for the full IP and BMC plan.
 
 ## Lab assumptions
 
-These values are based on the provided pod-22 lab details and should be adjusted in `inventories/pod22/group_vars/all/main.yml`.
+These values are based on the provided environment lab details and should be adjusted in `inventories/env/group_vars/all/main.yml`.
 
 | Item | Example |
 |---|---|
-| vCenter | `10.23.22.10` |
-| ESXi host | `10.23.22.11` |
-| Ansible controller / bastion | `10.23.22.12` / Ubuntu 24.04.4 LTS |
-| AD DNS | `10.23.22.100` |
+| vCenter | `10.23.74.10` |
+| ESXi host | `10.23.74.11` |
+| Ansible controller / bastion | `10.23.74.12` / Ubuntu 24.04.4 LTS |
+| AD DNS | `10.23.74.100` |
 | Base domain | `poc.local` |
-| Cluster name | `hub-sno` |
-| SNO node IP | `10.23.22.90` |
-| API DNS target | `10.23.22.90` by default for SNO platform `none` |
-| Ingress DNS target | `10.23.22.90` by default for SNO platform `none` |
-| Reserved API VIP | `10.23.22.91`, only used if `sno_install_platform: vsphere` |
-| Reserved Ingress VIP | `10.23.22.92`, only used if `sno_install_platform: vsphere` |
-| Gateway | `10.23.22.1` |
-| Machine network | `10.23.22.0/24` |
-| DNS server | `10.23.22.100` |
-| VLAN 3522 port group | `VLAN3522` |
+| Cluster name | `lab-sno` |
+| SNO node IP | `10.23.74.90` |
+| API DNS target | `10.23.74.90` by default for SNO platform `none` |
+| Ingress DNS target | `10.23.74.90` by default for SNO platform `none` |
+| Reserved API VIP | `10.23.74.91`, only used if `sno_install_platform: vsphere` |
+| Reserved Ingress VIP | `10.23.74.92`, only used if `sno_install_platform: vsphere` |
+| Gateway | `10.23.74.1` |
+| Machine network | `10.23.74.0/24` |
+| DNS server | `10.23.74.100` |
+| VLAN 3574 port group | `VLAN3574` |
 | Bare-metal cluster | `bm-spoke-01` |
-| Bare-metal API VIP | `10.23.22.120` |
-| Bare-metal Ingress VIP | `10.23.22.121` |
+| Bare-metal API VIP | `10.23.74.120` |
+| Bare-metal Ingress VIP | `10.23.74.121` |
 
 DNS records expected:
 
 ```text
-api.hub-sno.poc.local       -> 10.23.22.90
-api-int.hub-sno.poc.local   -> 10.23.22.90
-*.apps.hub-sno.poc.local    -> 10.23.22.90
-hub-sno-0.hub-sno.poc.local -> 10.23.22.90
+api.lab-sno.poc.local       -> 10.23.74.90
+api-int.lab-sno.poc.local   -> 10.23.74.90
+*.apps.lab-sno.poc.local    -> 10.23.74.90
+lab-sno-0.lab-sno.poc.local -> 10.23.74.90
 ```
 
 
@@ -105,7 +105,7 @@ The default SNO install platform is:
 sno_install_platform: none
 ```
 
-This is intentional for this lab. Ansible creates the VM on the standalone ESXi host through vCenter, while the OpenShift Agent ISO installs SNO with a static IP. In this mode, the hub API and apps wildcard DNS records point directly to the SNO node IP, `10.23.22.90`.
+This is intentional for this lab. Ansible creates the VM on the standalone ESXi host through vCenter, while the OpenShift Agent ISO installs SNO with a static IP. In this mode, the hub API and apps wildcard DNS records point directly to the SNO node IP, `10.23.74.90`.
 
 The reserved `api_vip` and `ingress_vip` values are only used if you deliberately switch the install config to vSphere platform mode:
 
@@ -114,7 +114,7 @@ sno_install_platform: vsphere
 vsphere_cluster: "YOUR_VCENTER_CLUSTER_NAME"
 ```
 
-Do not set `sno_install_platform: vsphere` unless your vCenter inventory has a real compute cluster name and you want OpenShift to be vSphere platform-integrated. For the provided pod-22 layout, leave it as `none`.
+Do not set `sno_install_platform: vsphere` unless your vCenter inventory has a real compute cluster name and you want OpenShift to be vSphere platform-integrated. For the provided environment layout, leave it as `none`.
 
 ---
 
@@ -125,7 +125,7 @@ The Ansible controller for this lab is the Ubuntu bastion VM:
 | Item | Value |
 |---|---|
 | Bastion VM | `RedHat-VM01` |
-| Bastion IP | `10.23.22.12` |
+| Bastion IP | `10.23.74.12` |
 | OS | Ubuntu 24.04.4 LTS |
 | Role | Ansible control node, OpenShift installer host, vSphere automation runner |
 
@@ -175,23 +175,23 @@ See [`docs/ubuntu-bastion.md`](docs/ubuntu-bastion.md) for the full Ubuntu packa
 Ansible variable layout used by this repo:
 
 ```text
-inventories/pod22/group_vars/all/main.yml   # normal, non-secret variables
-inventories/pod22/group_vars/all/vault.yml  # encrypted secrets only
+inventories/env/group_vars/all/main.yml   # normal, non-secret variables
+inventories/env/group_vars/all/vault.yml  # encrypted secrets only
 ```
 
 Edit:
 
 ```bash
-inventories/pod22/group_vars/all/main.yml
+inventories/env/group_vars/all/main.yml
 ```
 
 Create your private vault file from the example:
 
 ```bash
 source .venv/bin/activate
-cp inventories/pod22/group_vars/all/vault.yml.example inventories/pod22/group_vars/all/vault.yml
-ansible-vault encrypt inventories/pod22/group_vars/all/vault.yml
-ansible-vault edit inventories/pod22/group_vars/all/vault.yml
+cp inventories/env/group_vars/all/vault.yml.example inventories/env/group_vars/all/vault.yml
+ansible-vault encrypt inventories/env/group_vars/all/vault.yml
+ansible-vault edit inventories/env/group_vars/all/vault.yml
 ```
 
 Put your real vCenter password, pull secret, and SSH public key in the encrypted vault file.
@@ -229,7 +229,7 @@ do not keep retrying `pip install nmstate==2.0.0` normally. That causes pip to b
 Then rerun:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
 ```
 
 ---
@@ -259,7 +259,7 @@ esxi_datastore_mount: "/vmfs/volumes/{{ vsphere_datastore }}"
 Add the ESXi root password to your encrypted vault file:
 
 ```bash
-ansible-vault edit inventories/pod22/group_vars/all/vault.yml
+ansible-vault edit inventories/env/group_vars/all/vault.yml
 ```
 
 Example vault entry:
@@ -271,19 +271,19 @@ vault_esxi_password: "CHANGE_ME"
 Make sure SSH is enabled on the ESXi host, then rerun:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ```
 
 The ISO will be copied directly to the ESXi datastore path, for example:
 
 ```text
-/vmfs/volumes/datastore1/iso/ocp/hub-sno-agent.x86_64.iso
+/vmfs/volumes/datastore1/iso/ocp/lab-sno-agent.x86_64.iso
 ```
 
 The VM still references it through vCenter as:
 
 ```text
-[datastore1] iso/ocp/hub-sno-agent.x86_64.iso
+[datastore1] iso/ocp/lab-sno-agent.x86_64.iso
 ```
 
 To force the old vCenter API upload method, set:
@@ -314,7 +314,7 @@ sno_vm_poweroff_before_configure: true
 sno_vm_recreate: false
 ```
 
-The SNO VM has one NIC only. It does not require VLAN522. The VM creation playbook also enforces the required vSphere advanced setting:
+The SNO VM has one NIC only. It does not require VLAN574. The VM creation playbook also enforces the required vSphere advanced setting:
 
 ```text
 disk.EnableUUID = TRUE
@@ -325,12 +325,12 @@ If you already generated an ISO before this fix, remove the old build directory 
 ```bash
 cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
-rm -rf build/hub-sno
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
+rm -rf build/lab-sno
+ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ```
 
-If you want the playbook to delete and recreate the existing `hub-sno` VM, temporarily set this in `inventories/pod22/group_vars/all/main.yml`:
+If you want the playbook to delete and recreate the existing `lab-sno` VM, temporarily set this in `inventories/env/group_vars/all/main.yml`:
 
 ```yaml
 sno_vm_recreate: true
@@ -366,11 +366,11 @@ source .venv/bin/activate
 Then run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/03_wait_install.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/03_wait_install.yml --ask-vault-pass
 ```
 
 Or run the SNO-only flow:
@@ -382,8 +382,8 @@ Or run the SNO-only flow:
 ## Install ACM on the SNO hub
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/06_install_acm.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_configure_assisted_service.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/06_install_acm.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_configure_assisted_service.yml --ask-vault-pass
 ```
 
 The ACM channel is controlled by this variable:
@@ -401,19 +401,19 @@ oc get packagemanifest advanced-cluster-management -n openshift-marketplace \
 
 ## Build the ACM managed bare-metal cluster
 
-First, confirm the missing boot MACs for `b09-33` and `b09-34` in:
+First, confirm the missing boot MACs for `b10-35` and `b10-36` in:
 
 ```bash
-inventories/pod22/group_vars/all/main.yml
+inventories/env/group_vars/all/main.yml
 ```
 
 Then run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/10_configure_bm_ad_dns.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/05_idrac_preflight.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/09_wait_baremetal_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/10_configure_bm_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/05_idrac_preflight.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/09_wait_baremetal_cluster.yml --ask-vault-pass
 ```
 
 Or run the full hub-and-spoke flow:
@@ -429,16 +429,16 @@ Or run the full hub-and-spoke flow:
 If WinRM is enabled to the AD server, you can run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
 ```
 
 If WinRM is not enabled, create these records manually in AD DNS:
 
 ```powershell
-Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "api.hub-sno" -IPv4Address "10.23.22.90"
-Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "api-int.hub-sno" -IPv4Address "10.23.22.90"
-Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "*.apps.hub-sno" -IPv4Address "10.23.22.90"
-Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "hub-sno-0.hub-sno" -IPv4Address "10.23.22.90"
+Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "api.lab-sno" -IPv4Address "10.23.74.90"
+Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "api-int.lab-sno" -IPv4Address "10.23.74.90"
+Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "*.apps.lab-sno" -IPv4Address "10.23.74.90"
+Add-DnsServerResourceRecordA -ZoneName "poc.local" -Name "lab-sno-0.lab-sno" -IPv4Address "10.23.74.90"
 ```
 
 ---
@@ -449,14 +449,14 @@ The default spoke cluster uses the Dell nodes like this:
 
 | Node | iDRAC IP | OpenShift IP | Role | Status |
 |---|---:|---:|---|---|
-| b08-33 | 10.23.22.80 | 10.23.22.110 | master | ready |
-| b08-34 | 10.23.22.81 | 10.23.22.111 | master | ready |
-| b08-35 | 10.23.22.82 | 10.23.22.112 | master | ready |
-| b08-36 | 10.23.22.83 | 10.23.22.113 | worker | ready |
-| b09-33 | 10.23.22.84 | 10.23.22.114 | worker | needs boot MAC |
-| b09-34 | 10.23.22.85 | 10.23.22.115 | worker | needs boot MAC |
+| b10-30 | 10.23.74.81 | 10.23.74.110 | master | ready |
+| b10-31 | 10.23.74.82 | 10.23.74.111 | master | ready |
+| b10-33 | 10.23.74.83 | 10.23.74.112 | master | ready |
+| b10-34 | 10.23.74.84 | 10.23.74.113 | worker | ready |
+| b10-35 | 10.23.74.85 | 10.23.74.114 | worker | needs boot MAC |
+| b10-36 | 10.23.74.86 | 10.23.74.115 | worker | needs boot MAC |
 
-The `10.23.22.80-85` addresses are treated as BMC/iDRAC IPs, not OpenShift node IPs.
+The `10.23.74.81-85` addresses are treated as BMC/iDRAC IPs, not OpenShift node IPs.
 
 The default BMC URL format is:
 
@@ -474,7 +474,7 @@ For a smaller demo cluster, keep only the first three nodes enabled:
 bm_control_plane_count: 3
 bm_worker_count: 0
 
-# b08-36, b09-33, b09-34
+# b10-34, b10-35, b10-36
 enabled: false
 ```
 
@@ -483,7 +483,7 @@ enabled: false
 After the SNO hub install finishes:
 
 ```bash
-export KUBECONFIG="$PWD/build/hub-sno/auth/kubeconfig"
+export KUBECONFIG="$PWD/build/lab-sno/auth/kubeconfig"
 oc get nodes
 oc get clusterversion
 oc get co
@@ -501,7 +501,7 @@ oc -n bm-spoke-01 get bmh,agents -o wide
 Console URL:
 
 ```text
-https://console-openshift-console.apps.hub-sno.poc.local
+https://console-openshift-console.apps.lab-sno.poc.local
 ```
 
 ---
@@ -510,14 +510,14 @@ https://console-openshift-console.apps.hub-sno.poc.local
 
 - DHCP is not used. Static IP is embedded in `agent-config.yaml`.
 - The SNO VM NIC MAC addresses must match the MAC addresses in `agent-config.yaml`.
-- The VMware port group backing `eth0` must be an access port group for VLAN 3522.
+- The VMware port group backing `eth0` must be an access port group for VLAN 3574.
 - With the default `sno_install_platform: none`, `apiVIPs` and `ingressVIPs` are not rendered into `install-config.yaml`; API and apps DNS point to the SNO node IP.
 - If you switch to `sno_install_platform: vsphere`, `apiVIPs`, `ingressVIPs`, and `vsphere_cluster` must be valid for your vCenter inventory.
-- The VMware playbook defaults to the standalone ESXi host at `10.23.22.11`; if your vCenter inventory uses a cluster, edit `02_create_vsphere_vm.yml` to use `cluster` instead of `esxi_hostname`.
+- The VMware playbook defaults to the standalone ESXi host at `10.23.74.11`; if your vCenter inventory uses a cluster, edit `02_create_vsphere_vm.yml` to use `cluster` instead of `esxi_hostname`.
 - For this SNO hub lab, reusing the SNO node IP for API and apps DNS is expected in platform `none` mode.
 - `.local` can conflict with mDNS in some environments. It is okay for a controlled lab, but a normal DNS zone is cleaner.
 - The ACM bare-metal flow assumes Redfish virtual media because DHCP and a provisioning network are not being used.
-- The b09-33 and b09-34 boot NIC MAC addresses are placeholders and must be filled in before running `08_apply_baremetal_cluster.yml`.
+- The b10-35 and b10-36 boot NIC MAC addresses are placeholders and must be filled in before running `08_apply_baremetal_cluster.yml`.
 - The starter enforces iDRAC firmware consistency and currently expects `7.30.10.50`. Update `idrac_firmware_expected` if you standardise on a different version.
 
 
@@ -574,7 +574,7 @@ The fixed preflight uses explicit boolean comparisons:
 Then rerun:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
 ```
 
 ## Troubleshooting: `vault_vcenter_password is undefined`
@@ -582,13 +582,13 @@ ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_preflight.yml --ask
 The vault file must be in the `all` group vars directory so Ansible loads it automatically:
 
 ```bash
-inventories/pod22/group_vars/all/vault.yml
+inventories/env/group_vars/all/vault.yml
 ```
 
 If you created it in the old starter location:
 
 ```bash
-inventories/pod22/group_vars/vault.yml
+inventories/env/group_vars/vault.yml
 ```
 
 move it with:
@@ -600,14 +600,14 @@ move it with:
 Or do it manually:
 
 ```bash
-mkdir -p inventories/pod22/group_vars/all
-mv inventories/pod22/group_vars/vault.yml inventories/pod22/group_vars/all/vault.yml
+mkdir -p inventories/env/group_vars/all
+mv inventories/env/group_vars/vault.yml inventories/env/group_vars/all/vault.yml
 ```
 
 Then verify that Ansible can see the vaulted variables:
 
 ```bash
-ansible-inventory -i inventories/pod22/hosts.yml --list --ask-vault-pass \
+ansible-inventory -i inventories/env/hosts.yml --list --ask-vault-pass \
   | jq '._meta.hostvars.localhost | has("vault_vcenter_password")'
 ```
 
@@ -627,7 +627,7 @@ Older versions of this starter always rendered a vSphere platform block in `inst
 vsphere_cluster: "..."
 ```
 
-That is not ideal for the provided pod-22 lab because the VM is being created by Ansible on a standalone ESXi host through vCenter. The current default is now:
+That is not ideal for the provided environment lab because the VM is being created by Ansible on a standalone ESXi host through vCenter. The current default is now:
 
 ```yaml
 sno_install_platform: none
@@ -672,7 +672,7 @@ then the datastore browser cannot find or create the target folder path. The pla
 First confirm the datastore and datacenter names match the vCenter inventory exactly:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
 ```
 
 If folder creation is still blocked, upload the ISO to the datastore root by changing:
@@ -684,13 +684,13 @@ iso_datastore_folder: ""
 Then rerun:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ```
 
 When using the datastore root fallback, the VM CD-ROM path becomes:
 
 ```text
-[datastore1] hub-sno-agent.x86_64.iso
+[datastore1] lab-sno-agent.x86_64.iso
 ```
 
 ## Troubleshooting: `No datacenter named Datacenter was found`
@@ -701,12 +701,12 @@ If `playbooks/02_create_vsphere_vm.yml` fails at VM creation with:
 No datacenter named Datacenter was found
 ```
 
-then the placeholder value in `inventories/pod22/group_vars/all/main.yml` does not match the exact vCenter inventory name.
+then the placeholder value in `inventories/env/group_vars/all/main.yml` does not match the exact vCenter inventory name.
 
 Run the discovery playbook:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_discover_vsphere_inventory.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_discover_vsphere_inventory.yml --ask-vault-pass
 ```
 
 Then update these values exactly as shown by vCenter:
@@ -716,7 +716,7 @@ vsphere_datacenter: "<exact datacenter name>"
 vsphere_folder: "/{{ vsphere_datacenter }}/vm"
 vsphere_esxi_hostname: "<exact host name from vCenter, often an FQDN rather than an IP>"
 vsphere_datastore: "<exact datastore name>"
-vm_network_eth0: "<exact port group for VLAN 3522>"
+vm_network_eth0: "<exact port group for VLAN 3574>"
 vm_network_eth1: ""  # not used unless secondary_nic_enabled is true
 ```
 
@@ -726,7 +726,7 @@ The playbooks now include early vSphere inventory validation so the error shows 
 The VMware SNO hub uses one vSphere NIC by default:
 
 ```text
-hub-sno ens192 -> vm_network_eth0 -> VLAN3522 / machine network
+lab-sno ens192 -> vm_network_eth0 -> VLAN3574 / machine network
 ```
 
 `vm_network_eth1` is intentionally blank and `sno_node.secondary_nic_enabled` is `false`.
@@ -734,10 +734,10 @@ hub-sno ens192 -> vm_network_eth0 -> VLAN3522 / machine network
 Discovery must show the primary port group before VM creation succeeds:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_discover_vsphere_inventory.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_discover_vsphere_inventory.yml --ask-vault-pass
 ```
 
-If discovery only shows `MGMT` and `DSwitch-DVUplinks-18`, either set `vm_network_eth0: MGMT` if MGMT is already backed by VLAN 3522, or create a dedicated port group:
+If discovery only shows `MGMT` and `DSwitch-DVUplinks-18`, either set `vm_network_eth0: MGMT` if MGMT is already backed by VLAN 3574, or create a dedicated port group:
 
 ```yaml
 vm_network_eth0: MGMT
@@ -746,14 +746,14 @@ esxi_vswitch_name: vSwitch0
 sno_primary_portgroup_vlan_id: 0
 ```
 
-Use `sno_primary_portgroup_vlan_id: 0` when the ESXi physical switchport is an access port on VLAN 3522. Use `3522` only when the ESXi uplink is trunked and tagging VLAN 3522 is required on the port group.
+Use `sno_primary_portgroup_vlan_id: 0` when the ESXi physical switchport is an access port on VLAN 3574. Use `3574` only when the ESXi uplink is trunked and tagging VLAN 3574 is required on the port group.
 
 To create/validate the standard vSwitch port group over ESXi SSH:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_create_sno_primary_portgroup.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_discover_vsphere_inventory.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_create_sno_primary_portgroup.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/00_discover_vsphere_inventory.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ```
 
 
@@ -764,7 +764,7 @@ ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_create_vsphere_vm.y
 Run the diagnostic playbook:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/03_check_install_status.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/03_check_install_status.yml --ask-vault-pass
 ```
 
 It checks VM power state, DNS resolution, ping to the SNO static IP, ports 22/6443/22623, the installer log, and basic RHCOS/agent journal snippets over SSH.
@@ -784,7 +784,7 @@ api-int.<cluster>.<base-domain>   -> SNO node IP
 Ubuntu 24.04 uses a newer OpenSSH `scp` that defaults to SFTP mode. Many ESXi hosts do not provide an SFTP subsystem, so a plain `scp` can fail even when SSH and `mkdir` work. The playbook therefore uses `scp -O` to force the legacy SCP protocol:
 
 ```bash
-scp -O local.iso root@10.23.22.11:/vmfs/volumes/datastore1/iso/ocp/
+scp -O local.iso root@10.23.74.11:/vmfs/volumes/datastore1/iso/ocp/
 ```
 
 The ESXi upload tasks are intentionally not hidden by default (`esxi_upload_no_log: false`) so failures show useful stderr. The password is passed via `SSHPASS` environment variable and is not present in the command line.
@@ -792,7 +792,7 @@ The ESXi upload tasks are intentionally not hidden by default (`esxi_upload_no_l
 
 ## SNO primary port group auto-create
 
-The VMware SNO hub uses one NIC only. By default, `vm_network_eth0` is `VLAN3522` and `vm_network_eth1` is blank. If vCenter does not already show `VLAN3522` as a VM port group, `playbooks/02_create_vsphere_vm.yml` will now try to create it on the ESXi host using SSH before VM creation.
+The VMware SNO hub uses one NIC only. By default, `vm_network_eth0` is `VLAN3574` and `vm_network_eth1` is blank. If vCenter does not already show `VLAN3574` as a VM port group, `playbooks/02_create_vsphere_vm.yml` will now try to create it on the ESXi host using SSH before VM creation.
 
 Defaults:
 
@@ -804,13 +804,13 @@ sno_primary_portgroup_vlan_id: 0
 sno_primary_portgroup_auto_create: false
 ```
 
-Use VLAN ID `0` when the physical ESXi uplink switchport is already access VLAN 3522. Use VLAN ID `3522` only when the ESXi uplink is a trunk carrying tagged VLAN 3522.
+Use VLAN ID `0` when the physical ESXi uplink switchport is already access VLAN 3574. Use VLAN ID `3574` only when the ESXi uplink is a trunk carrying tagged VLAN 3574.
 
 ---
 
 ## Day-2: LVM, RHACM, bare-metal provisioning, and Site-A
 
-The repo now includes a Day-2 flow for the hub after `hub-sno` is installed:
+The repo now includes a Day-2 flow for the hub after `lab-sno` is installed:
 
 ```bash
 cd ~/OCP/ocp-sno-vsphere-ansible
@@ -820,14 +820,14 @@ source .venv/bin/activate
 
 This flow:
 
-1. Adds a 800 GB second disk to the `hub-sno` VM if it is missing.
+1. Adds a 800 GB second disk to the `lab-sno` VM if it is missing.
 2. Installs the LVM Storage Operator.
 3. Creates an `LVMCluster` using `/dev/sdb` and sets `lvms-vg1` as the default StorageClass.
 4. Installs RHACM.
 5. Configures Assisted Service storage.
 6. Enables/validates bare-metal provisioning.
 7. Configures DNS for `site-a`.
-8. Adds `b08-33`, `b08-34`, and `b08-35` through iDRAC/Redfish virtual media.
+8. Adds `b10-30`, `b10-31`, and `b10-33` through iDRAC/Redfish virtual media.
 9. Provisions the managed cluster as `site-a` / `Site-A`.
 
 See `docs/site-a-day2.md` for the step-by-step commands and troubleshooting checks.
@@ -838,10 +838,10 @@ See `docs/site-a-day2.md` for the step-by-step commands and troubleshooting chec
 Before applying or rebooting the bare-metal hosts, run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
 ```
 
-This catches the common iDRAC console failure where the node shows `coreos-livepxe-rootfs` and `curl: (22) The requested URL returned error: 503`. The usual cause is that AD DNS for `*.apps.hub-sno.poc.local` still points at an old VIP instead of the SNO IP `10.23.22.90`, or the Assisted Image Service route has no ready endpoints.
+This catches the common iDRAC console failure where the node shows `coreos-livepxe-rootfs` and `curl: (22) The requested URL returned error: 503`. The usual cause is that AD DNS for `*.apps.lab-sno.poc.local` still points at an old VIP instead of the SNO IP `10.23.74.90`, or the Assisted Image Service route has no ready endpoints.
 
 ## Site-A bare-metal NIC mapping
 
@@ -852,18 +852,18 @@ NIC 1 Port 1, while RHCOS names the interface `eno33np0`.
 Run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/05_discover_idrac_nics.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/05_discover_idrac_nics.yml --ask-vault-pass
 ```
 
-For the current R6525 b08-33/b08-34/b08-35 nodes, the repo defaults the primary
+For the current R6525 b10-30/b10-31/b10-33 nodes, the repo defaults the primary
 bare-metal interface to `eno33np0` and uses the Integrated NIC 1 Port 1 MACs.
 
 If manifests were already applied with the wrong interface name:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reset_site_a_for_nmstate_fix.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_reset_site_a_for_nmstate_fix.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass
 ```
 
 ## Site-A HCP KubeVirt hosting
@@ -871,9 +871,9 @@ ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_a_nodes
 After `site-a` is installed and imported into RHACM, you can prepare it as a Hosted Control Plane hosting cluster with OpenShift Virtualization, MCE, MetalLB, and wildcard ingress policies:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/12_apply_site_a_hcp_policies.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/13_wait_site_a_hcp_prereqs.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/14_create_site_a_hcp_kubevirt_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/12_apply_site_a_hcp_policies.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/13_wait_site_a_hcp_prereqs.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/14_create_site_a_hcp_kubevirt_cluster.yml --ask-vault-pass
 ```
 
 See `docs/site-a-hcp-kubevirt.md` for details and validation commands.

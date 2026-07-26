@@ -1,6 +1,6 @@
 # Day-2 hub setup and Site-A bare-metal cluster
 
-This repo is preconfigured for the next Day-2 sequence after the `hub-sno` cluster is installed.
+This repo is preconfigured for the next Day-2 sequence after the `lab-sno` cluster is installed.
 
 ## What this config does
 
@@ -12,9 +12,9 @@ This repo is preconfigured for the next Day-2 sequence after the `hub-sno` clust
 6. Configures Assisted Service storage to use the LVM default StorageClass.
 7. Enables or validates bare-metal provisioning services.
 8. Adds only these three Dell iDRAC nodes to ACM:
-   - `b08-33`
-   - `b08-34`
-   - `b08-35`
+   - `b10-30`
+   - `b10-31`
+   - `b10-33`
 9. Provisions the bare-metal OpenShift cluster as `site-a` / display name `Site-A`.
 
 ## Run the full Day-2 flow
@@ -29,21 +29,21 @@ source .venv/bin/activate
 Or run the combined playbook directly:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/11_configure_hub_and_site_a.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/11_configure_hub_and_site_a.yml --ask-vault-pass
 ```
 
 ## Run step-by-step
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/02_add_sno_extra_disk.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/05_install_lvm_storage.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/06_install_acm.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_configure_assisted_service.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_enable_baremetal_provisioning.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/10_configure_bm_ad_dns.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/05_idrac_preflight.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/09_wait_baremetal_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/02_add_sno_extra_disk.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/05_install_lvm_storage.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/06_install_acm.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_configure_assisted_service.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_enable_baremetal_provisioning.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/10_configure_bm_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/05_idrac_preflight.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/09_wait_baremetal_cluster.yml --ask-vault-pass
 ```
 
 ## Important variables
@@ -64,18 +64,18 @@ bm_control_plane_count: 3
 bm_worker_count: 0
 ```
 
-Only `b08-33`, `b08-34`, and `b08-35` are enabled. The other Dell nodes are left in the inventory but disabled.
+Only `b10-30`, `b10-31`, and `b10-33` are enabled. The other Dell nodes are left in the inventory but disabled.
 
 ## Check the hub storage
 
 ```bash
-export KUBECONFIG=$PWD/build/hub-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 oc get storageclass
 oc -n openshift-storage get lvmcluster lvmcluster -o yaml
-oc debug node/hub-sno-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+oc debug node/lab-sno-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
 ```
 
-If the second disk is not `/dev/sdb`, change `lvm_device_paths` in `inventories/pod22/group_vars/all/main.yml` and rerun `05_install_lvm_storage.yml`.
+If the second disk is not `/dev/sdb`, change `lvm_device_paths` in `inventories/env/group_vars/all/main.yml` and rerun `05_install_lvm_storage.yml`.
 
 ## Check Site-A provisioning
 
@@ -98,24 +98,24 @@ then the node successfully booted the Assisted Installer image, but it cannot do
 rootfs from the hub route:
 
 ```text
-https://assisted-image-service-multicluster-engine.apps.hub-sno.poc.local/boot-artifacts/rootfs?arch=x86_64&version=4.21
+https://assisted-image-service-multicluster-engine.apps.lab-sno.poc.local/boot-artifacts/rootfs?arch=x86_64&version=4.21
 ```
 
 Run the validation playbook before rebooting the bare-metal nodes:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
 ```
 
 The important check is that the DNS server used by the bare-metal nodes resolves the hub wildcard apps route to the SNO IP:
 
 ```text
-assisted-image-service-multicluster-engine.apps.hub-sno.poc.local -> 10.23.22.90
+assisted-image-service-multicluster-engine.apps.lab-sno.poc.local -> 10.23.74.90
 ```
 
 After the route and DNS pass, reboot the stuck nodes:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass
 ```

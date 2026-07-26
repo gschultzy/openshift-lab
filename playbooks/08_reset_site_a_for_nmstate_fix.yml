@@ -38,5 +38,5 @@
     - name: Show next commands
       ansible.builtin.debug:
         msg:
-          - "Now rerun: ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass"
-          - "Then reboot the iDRAC nodes or run: ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass"
+          - "Now rerun: ansible-playbook -i inventories/env/hosts.yml playbooks/08_apply_baremetal_cluster.yml --ask-vault-pass"
+          - "Then reboot the iDRAC nodes or run: ansible-playbook -i inventories/env/hosts.yml playbooks/08_reboot_site_a_nodes.yml --ask-vault-pass"

@@ -12,7 +12,7 @@ Many policy and HCP scripts must run against the hub API, not Site-A or Site-B.
 cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
 
-export HUB_KUBECONFIG=$PWD/build/hub-sno/install/auth/kubeconfig
+export HUB_KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 export KUBECONFIG=$HUB_KUBECONFIG
 
 oc whoami --show-server
@@ -22,7 +22,7 @@ oc get managedcluster -o wide
 The server must be:
 
 ```text
-https://api.hub-sno.poc.local:6443
+https://api.lab-sno.poc.local:6443
 ```
 
 Repair the hub kubeconfig if it points at Site-A or Site-B:
@@ -90,14 +90,14 @@ eno33np0
 For Site-B, rerun iDRAC NIC discovery if the b09 MAC placeholders changed:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/05_discover_site_b_idrac_nics.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/05_discover_site_b_idrac_nics.yml --ask-vault-pass
 ```
 
 Reset discovery objects after changing MACs or NMState:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reset_site_a_for_nmstate_fix.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reset_site_b_for_nmstate_fix.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_reset_site_a_for_nmstate_fix.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_reset_site_b_for_nmstate_fix.yml --ask-vault-pass
 ```
 
 ---
@@ -107,13 +107,13 @@ ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reset_site_b_for_nm
 Validate the Assisted Image Service route:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
 ```
 
 If the hub flow stops waiting for `assisted-service`, run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/07_debug_assisted_service.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/07_debug_assisted_service.yml --ask-vault-pass
 ```
 
 Check for unbound PVCs, ImagePullBackOff, CrashLoopBackOff, route issues, or pod scheduling errors.
@@ -125,8 +125,8 @@ Check for unbound PVCs, ImagePullBackOff, CrashLoopBackOff, route issues, or pod
 Rerun the Site-B reboot and wait playbooks:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/08_reboot_site_b_nodes.yml --ask-vault-pass
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/09_wait_site_b_baremetal_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/08_reboot_site_b_nodes.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/09_wait_site_b_baremetal_cluster.yml --ask-vault-pass
 ```
 
 ---
@@ -136,7 +136,7 @@ ansible-playbook -i inventories/pod22/hosts.yml playbooks/09_wait_site_b_baremet
 Disable StorageCluster enforcement while cleaning Pure or rebuilding nodes:
 
 ```bash
-HUB=build/hub-sno/install/auth/kubeconfig
+HUB=build/lab-sno/install/auth/kubeconfig
 
 oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
   --type=merge \
@@ -196,7 +196,7 @@ This usually means old Pure cloud-drive / DriveSet volumes from a previous Portw
 First disable the StorageCluster policy:
 
 ```bash
-HUB=build/hub-sno/install/auth/kubeconfig
+HUB=build/lab-sno/install/auth/kubeconfig
 oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
   --type=merge \
   -p '{"spec":{"disabled":true}}'
@@ -230,7 +230,7 @@ Watch Portworx:
 ```bash
 watch -n 10 '
 for site in site-a site-b; do
-  K=build/hub-sno/${site}/auth/kubeconfig
+  K=build/lab-sno/${site}/auth/kubeconfig
   echo
   echo "### $site"
   oc --kubeconfig "$K" -n portworx get storagecluster px-cluster-flasharray 2>/dev/null || true
@@ -255,7 +255,7 @@ Delete Portworx runtime objects first, then force-unmount host paths with `nsent
 
 ```bash
 for site in site-a site-b; do
-  K="build/hub-sno/${site}/auth/kubeconfig"
+  K="build/lab-sno/${site}/auth/kubeconfig"
 
   oc --kubeconfig "$K" -n portworx delete storagecluster px-cluster-flasharray --ignore-not-found --wait=false
   oc --kubeconfig "$K" -n portworx delete pod --all --ignore-not-found --wait=false
@@ -297,15 +297,15 @@ HCP_FORCE_CLEANUP=true ./scripts/hcp-delete.sh
 Check host-side resources:
 
 ```bash
-oc --kubeconfig build/hub-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
-oc --kubeconfig build/hub-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
+oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
+oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
 ```
 
 Check hub imports:
 
 ```bash
-oc --kubeconfig build/hub-sno/install/auth/kubeconfig get managedcluster
-oc --kubeconfig build/hub-sno/install/auth/kubeconfig get ns | egrep 'site-a-hcp-t1-px|site-b-hcp-t1-px'
+oc --kubeconfig build/lab-sno/install/auth/kubeconfig get managedcluster
+oc --kubeconfig build/lab-sno/install/auth/kubeconfig get ns | egrep 'site-a-hcp-t1-px|site-b-hcp-t1-px'
 ```
 
 ---
@@ -315,15 +315,15 @@ oc --kubeconfig build/hub-sno/install/auth/kubeconfig get ns | egrep 'site-a-hcp
 Exported guest kubeconfigs live here:
 
 ```text
-build/hub-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
-build/hub-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
+build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
+build/lab-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
 ```
 
 Example checks:
 
 ```bash
-oc --kubeconfig build/hub-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig get nodes
-oc --kubeconfig build/hub-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig get clusterversion
+oc --kubeconfig build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig get nodes
+oc --kubeconfig build/lab-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig get clusterversion
 ```
 
 ---

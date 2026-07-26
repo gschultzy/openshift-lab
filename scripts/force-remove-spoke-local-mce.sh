@@ -5,8 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 for entry in \
-  "Site-A:build/hub-sno/site-a/auth/kubeconfig" \
-  "Site-B:build/hub-sno/site-b/auth/kubeconfig"; do
+  "Site-A:build/lab-sno/site-a/auth/kubeconfig" \
+  "Site-B:build/lab-sno/site-b/auth/kubeconfig"; do
   display="${entry%%:*}"
   k="${entry#*:}"
 

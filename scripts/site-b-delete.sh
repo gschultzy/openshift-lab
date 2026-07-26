@@ -7,7 +7,7 @@ CLUSTER_NAME="site-b"
 POLICY_NS="site-b-policies"
 CLUSTERSET="site-b-baremetal"
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
 
 if [[ ! -s "$HUB_KUBECONFIG" ]]; then
   echo "Hub kubeconfig not found: $HUB_KUBECONFIG" >&2

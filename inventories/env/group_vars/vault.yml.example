@@ -1,0 +1,13 @@
+---
+# Deprecated location.
+# Ansible does not automatically load arbitrary files directly under group_vars/.
+# Put the real encrypted vault file here instead:
+#   inventories/env/group_vars/all/vault.yml
+#
+# Bootstrap:
+#   cp inventories/env/group_vars/all/vault.yml.example inventories/env/group_vars/all/vault.yml
+#   ansible-vault encrypt inventories/env/group_vars/all/vault.yml
+
+# Staged for the second FlashArray; not consumed until multi-array policy support is enabled.
+vault_pure_flasharray_secondary_password: "CHANGE_ME_SECONDARY_FLASHARRAY_PASSWORD"
+vault_pure_flasharray_secondary_api_token: "CHANGE_ME_SECONDARY_FLASHARRAY_API_TOKEN"

@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 ocp_version: "4.21"
 ocp_release_version: "4.21.20"
-cluster_name: hub-sno
+cluster_name: lab-sno
 base_domain: poc.local
 cluster_fqdn: "{{ cluster_name }}.{{ base_domain }}"
 
@@ -20,31 +20,34 @@ cluster_fqdn: "{{ cluster_name }}.{{ base_domain }}"
 # and fill in vsphere_cluster below.
 sno_install_platform: none
 
-machine_cidr: 10.23.22.0/24
+# The workbook labels the SNO network as DHCP but does not provide the assigned IP.
+# This automation renders static Agent networking, so 10.23.74.90 is a proposed
+# reserved address. Confirm it is excluded from DHCP and create the matching DNS records.
+machine_cidr: 10.23.74.0/24
 machine_cidr_prefix: 24
-gateway: 10.23.22.1
+gateway: 10.23.74.1
 dns_servers:
-  - 10.23.22.100
+  - 10.23.74.100
 
 sno_node:
-  hostname: hub-sno-0
-  fqdn: hub-sno-0.hub-sno.poc.local
-  ip: 10.23.22.90
+  hostname: lab-sno-0
+  fqdn: lab-sno-0.lab-sno.poc.local
+  ip: 10.23.74.90
   # These are VMware VM NIC MACs, not iDRAC MACs.
   # Keep them unique and make sure vCenter accepts the chosen static MAC range.
-  mac_eth0: "00:50:56:23:22:90"
+  mac_eth0: "00:50:56:23:74:90"
   primary_interface: ens192
 
   # Secondary NIC is disabled by default for the SNO hub.
-  # Do not configure VLAN522 for the SNO VM. The hub only needs VLAN3522.
+  # Do not configure VLAN574 for the SNO VM. The hub only needs VLAN3574.
   secondary_nic_enabled: false
   mac_eth1: ""
   secondary_interface: ""
 
 # VIPs are only used when sno_install_platform is "vsphere".
 # With platform none/SNO, DNS should point api/api-int/apps to the SNO node IP.
-api_vip: 10.23.22.91
-ingress_vip: 10.23.22.92
+api_vip: 10.23.74.91
+ingress_vip: 10.23.74.92
 sno_api_ip: "{{ sno_node.ip if sno_install_platform == 'none' else api_vip }}"
 sno_ingress_ip: "{{ sno_node.ip if sno_install_platform == 'none' else ingress_vip }}"
 
@@ -57,15 +60,17 @@ network_type: OVNKubernetes
 # ---------------------------------------------------------------------------
 # vSphere / VMware
 # ---------------------------------------------------------------------------
-vcenter_hostname: 10.23.22.10
+vcenter_hostname: 10.23.74.10
 vcenter_username: administrator@vsphere.local
 vcenter_password: "{{ vault_vcenter_password }}"
 validate_certs: false
 
-# Change these to match vCenter inventory names.
+# The workbook provides the vCenter and ESXi IPs but not the vCenter object names.
+# CompanyA / Resources / datastore1 / MGMT are retained assumptions and must be
+# verified with playbooks/00_discover_vsphere_inventory.yml before VM creation.
 # This starter creates the VM on the standalone ESXi host through vCenter.
 vsphere_datacenter: CompanyA
-vsphere_esxi_hostname: 10.23.22.11
+vsphere_esxi_hostname: 10.23.74.11
 vsphere_resource_pool: Resources
 vsphere_folder: "/{{ vsphere_datacenter }}/vm"
 vsphere_datastore: datastore1
@@ -74,17 +79,17 @@ vsphere_datastore: datastore1
 # Leave unset/empty when using the default platform none mode.
 vsphere_cluster: ""
 
-# Port group for the SNO VM machine network. This must map to VLAN 3522 on the ESXi/vSwitch side.
-# If discovery only shows MGMT and MGMT is already on VLAN 3522, set this to MGMT instead.
+# Port group for the SNO VM machine network. This must map to VLAN 3574 on the ESXi/vSwitch side.
+# If discovery only shows MGMT and MGMT is already on VLAN 3574, set this to MGMT instead.
 vm_network_eth0: MGMT
 
-# Optional secondary NIC. Disabled by default because the SNO hub only needs VLAN 3522.
+# Optional secondary NIC. Disabled by default because the SNO hub only needs VLAN 3574.
 # Leave blank unless sno_node.secondary_nic_enabled is set to true.
 vm_network_eth1: ""
 
 # Optional helper playbook 00_create_sno_primary_portgroup.yml / 02_create_vsphere_vm.yml uses these values.
-# Use VLAN ID 0 when the ESXi physical uplink switchport is ACCESS VLAN 3522.
-# Use VLAN ID 3522 only when the ESXi uplink is a TRUNK carrying VLAN 3522.
+# Use VLAN ID 0 when the ESXi physical uplink switchport is ACCESS VLAN 3574.
+# Use VLAN ID 3574 only when the ESXi uplink is a TRUNK carrying VLAN 3574.
 sno_primary_portgroup_vlan_id: 0
 sno_primary_portgroup_auto_create: false
 
@@ -102,7 +107,7 @@ sno_primary_dvs_name: DSwitch
 sno_primary_dvs_num_ports: 128
 
 # SNO VM sizing. Increase disk for ACM / hub workloads if needed.
-sno_vm_name: hub-sno
+sno_vm_name: lab-sno
 sno_vm_cpu: 16
 sno_vm_memory_mb: 65536
 sno_vm_disk_gb: 250
@@ -213,7 +218,7 @@ lvm_install_plan_approval: Automatic
 
 # The second vSphere disk attached to the SNO VM is expected to appear as /dev/sdb.
 # If the disk appears differently, update this list after running:
-#   oc debug node/hub-sno-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+#   oc debug node/lab-sno-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
 lvm_cluster_name: lvmcluster
 lvm_device_class_name: vg1
 lvm_storage_class_name: "lvms-{{ lvm_device_class_name }}"
@@ -271,13 +276,13 @@ bm_clusterset: site-a-baremetal
 bm_cluster_image_set_name: "openshift-v{{ ocp_version }}"
 bm_cluster_release_image: "quay.io/openshift-release-dev/ocp-release:{{ ocp_release_version }}-x86_64"
 
-bm_machine_cidr: 10.23.22.0/24
+bm_machine_cidr: 10.23.74.0/24
 bm_machine_cidr_prefix: 24
-bm_gateway: 10.23.22.1
+bm_gateway: 10.23.74.1
 bm_dns_servers:
-  - 10.23.22.100
-bm_api_vip: 10.23.22.120
-bm_ingress_vip: 10.23.22.121
+  - 10.23.74.100
+bm_api_vip: 10.23.74.120
+bm_ingress_vip: 10.23.74.121
 
 bm_cluster_network_cidr: 10.132.0.0/14
 bm_cluster_network_host_prefix: 23
@@ -293,89 +298,94 @@ bm_enable_ironic_agent: true
 # Prevents DHCP on the non-install NIC from adding an unexpected IP/default route.
 bm_disable_secondary_interfaces: true
 idrac_enforce_same_firmware: true
+# New environments must discover MACs from live iDRAC data. The discovery playbook
+# fills only CHANGE_ME placeholders and preflight then requires each configured MAC
+# to exist on a link-up host NIC reported by that node's iDRAC.
+idrac_discovery_auto_update_inventory: true
+idrac_require_current_mac_match: true
+idrac_discovery_preferred_port: "1"
 
 # These BMC addresses assume no provisioning network and use Redfish virtual media.
 # Confirm the System path on each iDRAC. Dell commonly uses /redfish/v1/Systems/System.Embedded.1
 idrac_redfish_system_path: /redfish/v1/Systems/System.Embedded.1
 
-# IMPORTANT: The 10.23.22.80-85 addresses below are treated as iDRAC/BMC addresses.
-# The OpenShift host OS static IPs are set separately as 10.23.22.110-115.
-# Change the boot_mac values if the listed BC:97:E1 values are not the NICs cabled to VLAN 3522.
+# IMPORTANT: The workbook does not provide the host NIC MAC addresses.
+# Keep CHANGE_ME placeholders until playbooks/05_discover_idrac_nics.yml reads the
+# live iDRAC Redfish inventory and writes the link-up Integrated NIC 1 Port 1 MAC.
+# OpenShift host OS IPs are allocated separately as 10.23.74.110-115.
 bm_nodes:
-  - name: b08-33
-    hostname: b08-33
+  - name: b10-30
+    hostname: b10-30
     role: master
     enabled: true
-    bmc_ip: 10.23.22.80
-    bmc_address: "redfish-virtualmedia://10.23.22.80{{ idrac_redfish_system_path }}"
-    # iDRAC shows this as Integrated NIC 1 Port 1 Partition 1.
-    # RHCOS console shows the Linux interface name as eno33np0.
-    boot_mac: "BC:97:E1:C3:F6:E0"
-    ip: 10.23.22.110
+    bmc_ip: 10.23.74.81
+    bmc_address: "redfish-virtualmedia://10.23.74.81{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
+    ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
     secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
-  - name: b08-34
-    hostname: b08-34
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b10-31
+    hostname: b10-31
     role: master
     enabled: true
-    bmc_ip: 10.23.22.81
-    bmc_address: "redfish-virtualmedia://10.23.22.81{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:7E:99:60"
-    ip: 10.23.22.111
+    bmc_ip: 10.23.74.82
+    bmc_address: "redfish-virtualmedia://10.23.74.82{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
+    ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
     secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
-  - name: b08-35
-    hostname: b08-35
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b10-33
+    hostname: b10-33
     role: master
     enabled: true
-    bmc_ip: 10.23.22.82
-    bmc_address: "redfish-virtualmedia://10.23.22.82{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:7E:99:F0"
-    ip: 10.23.22.112
+    bmc_ip: 10.23.74.83
+    bmc_address: "redfish-virtualmedia://10.23.74.83{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
+    ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1
     secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
-  - name: b08-36
-    hostname: b08-36
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b10-34
+    hostname: b10-34
     role: worker
     enabled: false
-    bmc_ip: 10.23.22.83
-    bmc_address: "redfish-virtualmedia://10.23.22.83{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:7E:98:D0"
-    ip: 10.23.22.113
-    primary_interface: eno1
-    secondary_interface: eno2
+    bmc_ip: 10.23.74.84
+    bmc_address: "redfish-virtualmedia://10.23.74.84{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
+    ip: 10.23.74.113
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
     secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
-  - name: b09-33
-    hostname: b09-33
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b10-35
+    hostname: b10-35
     role: worker
     enabled: false
-    bmc_ip: 10.23.22.84
-    bmc_address: "redfish-virtualmedia://10.23.22.84{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:7E:90:40"
-    ip: 10.23.22.114
-    primary_interface: eno1
-    secondary_interface: eno2
+    bmc_ip: 10.23.74.85
+    bmc_address: "redfish-virtualmedia://10.23.74.85{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
+    ip: 10.23.74.114
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
     secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
-  - name: b09-34
-    hostname: b09-34
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b10-36
+    hostname: b10-36
     role: worker
     enabled: false
-    bmc_ip: 10.23.22.85
-    bmc_address: "redfish-virtualmedia://10.23.22.85{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:6E:3A:90"
-    ip: 10.23.22.115
-    primary_interface: eno1
-    secondary_interface: eno2
+    bmc_ip: 10.23.74.86
+    bmc_address: "redfish-virtualmedia://10.23.74.86{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
+    ip: 10.23.74.115
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
     secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
+    idrac_firmware_expected: "7.30.30.51"
 
 bm_dns_records:
   - name: "api.{{ bm_cluster_name }}"
@@ -402,13 +412,13 @@ site_b_base_domain: poc.local
 site_b_fqdn: "{{ site_b_cluster_name }}.{{ site_b_base_domain }}"
 site_b_clusterset: site-b-baremetal
 
-site_b_machine_cidr: 10.23.22.0/24
+site_b_machine_cidr: 10.23.74.0/24
 site_b_machine_cidr_prefix: 24
-site_b_gateway: 10.23.22.1
+site_b_gateway: 10.23.74.1
 site_b_dns_servers:
-  - 10.23.22.100
-site_b_api_vip: 10.23.22.130
-site_b_ingress_vip: 10.23.22.131
+  - 10.23.74.100
+site_b_api_vip: 10.23.74.130
+site_b_ingress_vip: 10.23.74.131
 
 site_b_cluster_network_cidr: 10.136.0.0/14
 site_b_cluster_network_host_prefix: 23
@@ -420,38 +430,38 @@ site_b_worker_count: 0
 site_b_pull_secret_name: pull-secret
 
 site_b_nodes:
-  - name: b08-36
-    hostname: b08-36
+  - name: b10-34
+    hostname: b10-34
     role: master
     enabled: true
-    bmc_ip: 10.23.22.83
-    bmc_address: "redfish-virtualmedia://10.23.22.83{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:7E:98:D0"
-    ip: 10.23.22.113
-    primary_interface: eno33np0
-    secondary_interface: eno34np1
-    secondary_mac: ""
-    idrac_firmware_expected: "7.30.10.50"
-  - name: b09-33
-    hostname: b09-33
-    role: master
-    enabled: true
-    bmc_ip: 10.23.22.84
-    bmc_address: "redfish-virtualmedia://10.23.22.84{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:7E:90:40"
-    ip: 10.23.22.114
+    bmc_ip: 10.23.74.84
+    bmc_address: "redfish-virtualmedia://10.23.74.84{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
+    ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
     secondary_mac: ""
     idrac_firmware_expected: "7.30.30.51"
-  - name: b09-34
-    hostname: b09-34
+  - name: b10-35
+    hostname: b10-35
     role: master
     enabled: true
-    bmc_ip: 10.23.22.85
-    bmc_address: "redfish-virtualmedia://10.23.22.85{{ idrac_redfish_system_path }}"
-    boot_mac: "BC:97:E1:6E:3A:90"
-    ip: 10.23.22.115
+    bmc_ip: 10.23.74.85
+    bmc_address: "redfish-virtualmedia://10.23.74.85{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
+    ip: 10.23.74.114
+    primary_interface: eno33np0
+    secondary_interface: eno34np1
+    secondary_mac: ""
+    idrac_firmware_expected: "7.30.30.51"
+  - name: b10-36
+    hostname: b10-36
+    role: master
+    enabled: true
+    bmc_ip: 10.23.74.86
+    bmc_address: "redfish-virtualmedia://10.23.74.86{{ idrac_redfish_system_path }}"
+    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
+    ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1
     secondary_mac: ""
@@ -519,7 +529,7 @@ site_a_metallb_instance_name: metallb
 site_a_metallb_pool_name: hcp-lb-pool
 site_a_metallb_l2_advertisement_name: hcp-l2-advertisement
 # Five IPs reserved for HCP-related LoadBalancer services. Adjust if these are already in use.
-site_a_hcp_metallb_range: 10.23.22.122-10.23.22.126
+site_a_hcp_metallb_range: 10.23.74.122-10.23.74.126
 
 # Optional: install LVM on Site-A as part of the same policy set.
 # Leave disabled until you confirm the unused disk device paths on the Site-A bare-metal nodes.
@@ -689,7 +699,7 @@ site_b_metallb_instance_name: "{{ site_a_metallb_instance_name }}"
 site_b_metallb_pool_name: hcp-lb-pool
 site_b_metallb_l2_advertisement_name: hcp-l2-advertisement
 # Five IPs reserved for Site-B HCP-related LoadBalancer services.
-site_b_hcp_metallb_range: 10.23.22.132-10.23.22.136
+site_b_hcp_metallb_range: 10.23.74.132-10.23.74.136
 
 # Optional: install LVM on Site-B as part of the same policy set.
 # Leave disabled until you confirm unused disk device paths on the Site-B bare-metal nodes.
@@ -820,22 +830,35 @@ portworx_openshift_console_plugin_name: portworx
 #   2) Run ./scripts/create-pure-api-token.sh to generate/rotate an API token.
 #   3) Run ./scripts/run-portworx-pure-install.sh.
 # You can still bypass auto-generation by setting vault_pure_flasharray_api_token directly in vault.yml.
-pure_flasharray_name: SV16-X70R4-B06-09
-pure_flasharray_mgmt_endpoint: "10.23.22.50"
-pure_flasharray_ct0_endpoint: "10.23.22.51"
-pure_flasharray_ct1_endpoint: "10.23.22.52"
-pure_flasharray_file_vip: "10.23.22.55"
+pure_flasharray_name: SV16-X90R4-B10-01
+pure_flasharray_mgmt_endpoint: "10.23.74.50"
+pure_flasharray_ct0_endpoint: "10.23.74.51"
+pure_flasharray_ct1_endpoint: "10.23.74.52"
+# Not listed in the workbook; retain the conventional .55 placeholder until verified.
+pure_flasharray_file_vip: "10.23.74.55"
 pure_flasharray_username: pureuser
 pure_flasharray_password: "{{ vault_pure_flasharray_password | default('') }}"
 pure_flasharray_api_token: "{{ vault_pure_flasharray_api_token | default('') }}"
 pure_flasharray_generated_token_file: "{{ build_root }}/pure/generated-flasharray-token.yml"
-# The purefa_token module only returns the token when it creates/rotates it.
-# Keep true for automation so the repo can capture the token into the generated local vars file.
 pure_flasharray_token_recreate: true
-# Optional token expiry, examples: 23d, 12h, 4w. Empty means no expiry.
 pure_flasharray_token_timeout: ""
 pure_flasharray_realm: ""
 pure_flasharray_pod: ""
+
+# Second storage appliance from the Pod 74 workbook. The current Portworx policy
+# templates consume only pure_flasharray_* above, so this is deliberately staged
+# and disabled until the multi-array policy work is tested in the next part.
+# The workbook's FC map also shows the six nodes split across both appliances;
+# do not enable this until per-site/per-node array placement is designed and tested.
+pure_flasharray_secondary_enabled: false
+pure_flasharray_secondary_name: SV16-X20R4-B08-13
+pure_flasharray_secondary_mgmt_endpoint: "10.23.74.60"
+pure_flasharray_secondary_ct0_endpoint: "10.23.74.61"
+pure_flasharray_secondary_ct1_endpoint: "10.23.74.62"
+pure_flasharray_secondary_username: pureuser
+pure_flasharray_secondary_password: "{{ vault_pure_flasharray_secondary_password | default('') }}"
+pure_flasharray_secondary_api_token: "{{ vault_pure_flasharray_secondary_api_token | default('') }}"
+
 portworx_pure_san_type: FC
 # Enable iscsid only when changing portworx_pure_san_type to iSCSI.
 portworx_pure_enable_iscsid: false

@@ -1,9 +1,0 @@
----
-# Deprecated location.
-# Ansible does not automatically load arbitrary files directly under group_vars/.
-# Put the real encrypted vault file here instead:
-#   inventories/pod22/group_vars/all/vault.yml
-#
-# Bootstrap:
-#   cp inventories/pod22/group_vars/all/vault.yml.example inventories/pod22/group_vars/all/vault.yml
-#   ansible-vault encrypt inventories/pod22/group_vars/all/vault.yml

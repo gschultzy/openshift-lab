@@ -27,7 +27,7 @@ MSG
   exit 1
 fi
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
@@ -45,7 +45,7 @@ else
 fi
 
 ./scripts/ensure-hub-kubeconfig.sh
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml

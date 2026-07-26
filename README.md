@@ -3,9 +3,9 @@
 This repo builds this lab:
 
 ```text
-hub-sno = vSphere SNO hub with RHACM/MCE/Assisted Installer
-site-a  = bare-metal OpenShift hosting cluster: b08-33, b08-34, b08-35
-site-b  = bare-metal OpenShift hosting cluster: b08-36, b09-33, b09-34
+lab-sno = vSphere SNO hub with RHACM/MCE/Assisted Installer
+site-a  = bare-metal OpenShift hosting cluster: b10-30, b10-31, b10-33
+site-b  = bare-metal OpenShift hosting cluster: b10-34, b10-35, b10-36
 HCPs    = hosted control planes created on Site-A and Site-B
 ```
 
@@ -35,18 +35,19 @@ source .venv/bin/activate
 Check the main lab config:
 
 ```bash
-vi inventories/pod22/group_vars/all/main.yml
+vi inventories/env/group_vars/all/main.yml
 ```
 
 Important defaults in this lab:
 
 ```text
-Hub API:        api.hub-sno.poc.local
+Hub API:        api.lab-sno.poc.local
 Site-A API:     api.site-a.poc.local
 Site-B API:     api.site-b.poc.local
-Site-A nodes:   b08-33, b08-34, b08-35
-Site-B nodes:   b08-36, b09-33, b09-34
-Pure array:     10.23.22.50
+Site-A nodes:   b10-30, b10-31, b10-33
+Site-B nodes:   b10-34, b10-35, b10-36
+Primary array:  10.23.74.50
+Secondary array: 10.23.74.60 (staged; disabled)
 ```
 
 The scripts ask for the Ansible Vault password once and reuse it. You can also provide a vault password file:
@@ -68,7 +69,7 @@ Create the SNO hub VM and wait for OpenShift to install:
 Verify the hub:
 
 ```bash
-export HUB_KUBECONFIG=$PWD/build/hub-sno/install/auth/kubeconfig
+export HUB_KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 export KUBECONFIG=$HUB_KUBECONFIG
 
 oc get nodes
@@ -115,7 +116,7 @@ These site scripts do the hub day-2 work that is needed before bare-metal cluste
 Verify from the hub:
 
 ```bash
-export HUB_KUBECONFIG=$PWD/build/hub-sno/install/auth/kubeconfig
+export HUB_KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 export KUBECONFIG=$HUB_KUBECONFIG
 
 oc get managedcluster
@@ -173,7 +174,7 @@ Or manually:
 
 ```bash
 for site in site-a site-b; do
-  K="build/hub-sno/${site}/auth/kubeconfig"
+  K="build/lab-sno/${site}/auth/kubeconfig"
   echo
   echo "### $site"
   oc --kubeconfig "$K" -n portworx get storagecluster
@@ -215,18 +216,18 @@ The tenant list is defined in `scripts/lib/hcp-tenants.sh`. RHACM import names i
 Check the HCPs:
 
 ```bash
-oc --kubeconfig build/hub-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/hub-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/hub-sno/install/auth/kubeconfig get managedcluster
+oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/lab-sno/install/auth/kubeconfig get managedcluster
 ```
 
 Exported guest kubeconfigs are written here:
 
 ```text
-build/hub-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
-build/hub-sno/hcp-kubeconfigs/site-a-hcp-t2-kv.kubeconfig
-build/hub-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
-build/hub-sno/hcp-kubeconfigs/site-b-hcp-t2-kv.kubeconfig
+build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
+build/lab-sno/hcp-kubeconfigs/site-a-hcp-t2-kv.kubeconfig
+build/lab-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
+build/lab-sno/hcp-kubeconfigs/site-b-hcp-t2-kv.kubeconfig
 ```
 
 Destroy all HCP tenants:

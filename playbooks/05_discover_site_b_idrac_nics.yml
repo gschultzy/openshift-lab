@@ -23,5 +23,5 @@
     bm_dns_records: "{{ site_b_dns_records }}"
     bm_rendered_dir: "{{ site_b_rendered_dir }}"
     idrac_discovery_auto_update_inventory: true
-    idrac_discovery_inventory_file: "{{ repo_root }}/inventories/pod22/group_vars/all/main.yml"
+    idrac_discovery_inventory_file: "{{ inventory_dir }}/group_vars/all/main.yml"
     idrac_discovery_preferred_port: "1"

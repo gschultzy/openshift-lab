@@ -101,7 +101,7 @@
           fi
 
           if oc --kubeconfig "$kubeconfig" get multiclusterengine -A --no-headers 2>/dev/null | grep -q .; then
-            echo "ERROR: ${display} still has local MultiClusterEngine resources. This lab expects MCE only on hub-sno." >&2
+            echo "ERROR: ${display} still has local MultiClusterEngine resources. This lab expects MCE only on lab-sno." >&2
             oc --kubeconfig "$kubeconfig" get multiclusterengine -A 2>/dev/null || true
             bad=1
           fi
@@ -145,5 +145,5 @@
         msg:
           - "If Site-A/Site-B still show as Unknown, repair the ACM import agents first."
           - "If Site-A/Site-B local consoles show Fleet Management with local-cluster Unknown, stale spoke-side ACM/MCE is still installed."
-          - "For this lab, keep ACM/MCE only on hub-sno and clean stale local spoke hubs with: CONFIRM_REMOVE_LOCAL_MCE=true ./scripts/cleanup-spoke-local-mce.sh"
+          - "For this lab, keep ACM/MCE only on lab-sno and clean stale local spoke hubs with: CONFIRM_REMOVE_LOCAL_MCE=true ./scripts/cleanup-spoke-local-mce.sh"
           - "The policy playbooks no longer install a second MCE on Site-A/Site-B; they use the hub hypershift-addon instead."

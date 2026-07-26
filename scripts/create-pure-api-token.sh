@@ -11,7 +11,7 @@ else
   exit 1
 fi
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 
 if ! ansible-galaxy collection list purestorage.flasharray >/dev/null 2>&1; then
   echo "purestorage.flasharray collection is missing; installing requirements.yml" >&2

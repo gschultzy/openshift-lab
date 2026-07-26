@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/hub-sno/install/auth/kubeconfig}"
-SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$ROOT_DIR/build/hub-sno/site-a/auth/kubeconfig}"
-SITEB_KUBECONFIG="${SITEB_KUBECONFIG:-$ROOT_DIR/build/hub-sno/site-b/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}"
+SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
+SITEB_KUBECONFIG="${SITEB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
 
 for kc in "$HUB_KUBECONFIG" "$SITEA_KUBECONFIG" "$SITEB_KUBECONFIG"; do
   echo

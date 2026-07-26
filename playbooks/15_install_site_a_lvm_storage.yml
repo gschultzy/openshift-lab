@@ -57,7 +57,7 @@
     - name: Stop if no explicit device paths are configured and all-unused mode is not allowed
       ansible.builtin.fail:
         msg: >-
-          site_a_lvm_device_paths is empty. Set it in inventories/pod22/group_vars/all/main.yml, for example ['/dev/sdb'],
+          site_a_lvm_device_paths is empty. Set it in inventories/env/group_vars/all/main.yml, for example ['/dev/sdb'],
           after checking the lsblk output above. Or set site_a_lvm_allow_all_unused_devices=true if this is a disposable lab and
           you want LVMS to claim all unused disks automatically.
       when:

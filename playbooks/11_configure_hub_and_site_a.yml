@@ -7,6 +7,7 @@
 - import_playbook: 07_enable_baremetal_provisioning.yml
 - import_playbook: 07_validate_assisted_image_service.yml
 - import_playbook: 10_configure_bm_ad_dns.yml
+- import_playbook: 05_discover_idrac_nics.yml
 - import_playbook: 05_idrac_preflight.yml
 - import_playbook: 08_apply_baremetal_cluster.yml
 - import_playbook: 09_wait_baremetal_cluster.yml

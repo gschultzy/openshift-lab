@@ -26,10 +26,10 @@ or install storage and make it default before creating the HCP cluster.
 
 ## Variables
 
-Defaults are in `inventories/pod22/group_vars/all/main.yml`:
+Defaults are in `inventories/env/group_vars/all/main.yml`:
 
 ```yaml
-site_a_hcp_metallb_range: 10.23.22.122-10.23.22.126
+site_a_hcp_metallb_range: 10.23.74.122-10.23.74.126
 site_a_hcp_cluster_name: site-a-hcp-t1-px
 site_a_hcp_namespace: clusters
 site_a_hcp_nodepool_replicas: 3
@@ -44,9 +44,9 @@ site_a_hcp_etcd_storage_class: ""
 ```bash
 cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
-export KUBECONFIG=$PWD/build/hub-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/12_apply_site_a_hcp_policies.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/12_apply_site_a_hcp_policies.yml --ask-vault-pass
 ```
 
 ## Watch policy compliance
@@ -59,19 +59,19 @@ oc get managedcluster site-a --show-labels
 ## Wait for Site-A prerequisites
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/13_wait_site_a_hcp_prereqs.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/13_wait_site_a_hcp_prereqs.yml --ask-vault-pass
 ```
 
 This extracts the Site-A kubeconfig to:
 
 ```text
-build/hub-sno/site-a/auth/kubeconfig
+build/lab-sno/site-a/auth/kubeconfig
 ```
 
 ## Validate Site-A manually
 
 ```bash
-SITEA_KUBECONFIG=$PWD/build/hub-sno/site-a/auth/kubeconfig
+SITEA_KUBECONFIG=$PWD/build/lab-sno/site-a/auth/kubeconfig
 
 oc --kubeconfig $SITEA_KUBECONFIG get co
 oc --kubeconfig $SITEA_KUBECONFIG -n openshift-cnv get hyperconverged,pods
@@ -84,18 +84,18 @@ oc --kubeconfig $SITEA_KUBECONFIG get sc
 ## Create the HCP KubeVirt test cluster from Site-A
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/14_create_site_a_hcp_kubevirt_cluster.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/14_create_site_a_hcp_kubevirt_cluster.yml --ask-vault-pass
 ```
 
-The playbook installs/downloads the `hcp` CLI into `build/hub-sno/bin/hcp`, writes a temporary pull secret under `build/hub-sno/site-a-hcp/`, and runs:
+The playbook installs/downloads the `hcp` CLI into `build/lab-sno/bin/hcp`, writes a temporary pull secret under `build/lab-sno/site-a-hcp/`, and runs:
 
 ```bash
 hcp create cluster kubevirt \
   --name site-a-hcp-t1-px \
   --namespace clusters \
   --node-pool-replicas 3 \
-  --pull-secret build/hub-sno/site-a-hcp/pull-secret.json \
-  --ssh-key build/hub-sno/site-a-hcp/ssh.pub \
+  --pull-secret build/lab-sno/site-a-hcp/pull-secret.json \
+  --ssh-key build/lab-sno/site-a-hcp/ssh.pub \
   --memory 8Gi \
   --cores 4 \
   --etcd-storage-class <detected-or-configured-storageclass> \
@@ -105,7 +105,7 @@ hcp create cluster kubevirt \
 ## Watch the hosted cluster
 
 ```bash
-SITEA_KUBECONFIG=$PWD/build/hub-sno/site-a/auth/kubeconfig
+SITEA_KUBECONFIG=$PWD/build/lab-sno/site-a/auth/kubeconfig
 
 oc --kubeconfig $SITEA_KUBECONFIG -n clusters get hostedcluster,nodepool -w
 oc --kubeconfig $SITEA_KUBECONFIG -n clusters-site-a-hcp-t1-px get pods -w
@@ -114,28 +114,28 @@ oc --kubeconfig $SITEA_KUBECONFIG -n clusters-site-a-hcp-t1-px get pods -w
 ## Get hosted cluster kubeconfig
 
 ```bash
-SITEA_KUBECONFIG=$PWD/build/hub-sno/site-a/auth/kubeconfig
-build/hub-sno/bin/hcp create kubeconfig \
+SITEA_KUBECONFIG=$PWD/build/lab-sno/site-a/auth/kubeconfig
+build/lab-sno/bin/hcp create kubeconfig \
   --namespace clusters \
   --name site-a-hcp-t1-px \
-  > build/hub-sno/site-a-hcp/site-a-hcp-t1-px.kubeconfig
+  > build/lab-sno/site-a-hcp/site-a-hcp-t1-px.kubeconfig
 
-oc --kubeconfig build/hub-sno/site-a-hcp/site-a-hcp-t1-px.kubeconfig get nodes
-oc --kubeconfig build/hub-sno/site-a-hcp/site-a-hcp-t1-px.kubeconfig get co
+oc --kubeconfig build/lab-sno/site-a-hcp/site-a-hcp-t1-px.kubeconfig get nodes
+oc --kubeconfig build/lab-sno/site-a-hcp/site-a-hcp-t1-px.kubeconfig get co
 ```
 
 ## Hub visibility
 
 The policy playbook creates a `ManagedClusterAddOn` called `hypershift-addon` in the `site-a` namespace on the hub and patches the hub add-on deployment config for MCE hosted-cluster discovery when that object exists. The expected model is:
 
-- `hub-sno`: central RHACM hub
+- `lab-sno`: central RHACM hub
 - `site-a`: RHACM managed cluster and HCP/MCE hosting cluster
 - `site-a-hcp-t1-px`: hosted cluster created from Site-A
 
 After the hosted API is available, check discovery/import from the hub:
 
 ```bash
-export KUBECONFIG=$PWD/build/hub-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 oc get managedcluster
 oc -n site-a get managedclusteraddon hypershift-addon
 oc get discoveredcluster -A 2>/dev/null || true
@@ -168,10 +168,10 @@ oc --kubeconfig $SITEA_KUBECONFIG -n metallb-system delete operatorgroup metallb
 Run the LVM storage playbook after confirming the unused disk path on each Site-A node:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/15_install_site_a_lvm_storage.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/15_install_site_a_lvm_storage.yml --ask-vault-pass
 ```
 
-If `site_a_lvm_device_paths` is empty, the playbook stops after printing `lsblk` from each node. Set the correct unused disk path in `inventories/pod22/group_vars/all/main.yml`, for example:
+If `site_a_lvm_device_paths` is empty, the playbook stops after printing `lsblk` from each node. Set the correct unused disk path in `inventories/env/group_vars/all/main.yml`, for example:
 
 ```yaml
 site_a_lvm_device_paths:
@@ -187,7 +187,7 @@ For a disposable lab only, you can set `site_a_lvm_allow_all_unused_devices: tru
 If the Site-A managed cluster has the correct `hcp-hosting=true` and ClusterSet labels but the placement still shows `NoManagedClusterMatched`, the managed cluster is usually tainted `unreachable` or `unavailable` with `NoSelect`. For this lab, run:
 
 ```bash
-ansible-playbook -i inventories/pod22/hosts.yml playbooks/12_fix_site_a_policy_placement.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/12_fix_site_a_policy_placement.yml --ask-vault-pass
 ```
 
 This creates or repairs the `ManagedClusterSet`, `ManagedClusterSetBinding`, Site-A labels, and placement tolerations.

@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-HUB_CLUSTER_NAME="${HUB_CLUSTER_NAME:-hub-sno}"
+HUB_CLUSTER_NAME="${HUB_CLUSTER_NAME:-lab-sno}"
 HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/${HUB_CLUSTER_NAME}/install/auth/kubeconfig}"
 EXPECTED_API_HOST="api.${HUB_CLUSTER_NAME}.poc.local"
 

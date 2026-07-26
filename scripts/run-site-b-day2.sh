@@ -11,7 +11,7 @@ else
   exit 1
 fi
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 
 # Ask for the Ansible Vault password once, then reuse it for every playbook.
 # If ANSIBLE_VAULT_PASSWORD_FILE is already set, use that instead and do not prompt.
@@ -43,7 +43,7 @@ truthy() {
 }
 
 hub_kubeconfig_path() {
-  printf '%s\n' "${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
+  printf '%s\n' "${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
 }
 
 hub_is_up() {

@@ -1,14 +1,14 @@
 ---
 # Deprecated location.
 # Put the real encrypted vault file here instead:
-#   inventories/pod22/group_vars/all/vault.yml
+#   inventories/env/group_vars/all/vault.yml
 #
 # Normal non-secret variables also live under:
-#   inventories/pod22/group_vars/all/main.yml
+#   inventories/env/group_vars/all/main.yml
 #
 # Bootstrap:
-#   cp inventories/pod22/group_vars/all/vault.yml.example inventories/pod22/group_vars/all/vault.yml
-#   ansible-vault encrypt inventories/pod22/group_vars/all/vault.yml
+#   cp inventories/env/group_vars/all/vault.yml.example inventories/env/group_vars/all/vault.yml
+#   ansible-vault encrypt inventories/env/group_vars/all/vault.yml
 
 # Copy this file to vault.yml, fill in real values, then encrypt it with ansible-vault.
 
@@ -19,7 +19,7 @@ vault_esxi_password: "CHANGE_ME"
 vault_pull_secret: '{"auths":{}}'
 
 # SSH public key injected into the cluster nodes.
-vault_ssh_public_key: "ssh-ed25519 CHANGE_ME administrator@POD-22-VM-03"
+vault_ssh_public_key: "ssh-ed25519 CHANGE_ME administrator@ENV-BASTION"
 
 # Optional, only needed for AD DNS automation over WinRM.
 vault_ad_username: "POC\\administrator"
@@ -36,5 +36,9 @@ vault_pure_flasharray_api_token: "CHANGE_ME_FLASHARRAY_API_TOKEN"
 
 # Everpure/Pure FlashArray credentials for automated API token creation.
 # Store the login password only in Ansible Vault. The generated API token is written
-# to build/hub-sno/pure/generated-flasharray-token.yml with mode 0600.
+# to build/lab-sno/pure/generated-flasharray-token.yml with mode 0600.
 vault_pure_flasharray_password: "CHANGE_ME_FLASHARRAY_PASSWORD"
+
+# Staged for the second FlashArray; not consumed until multi-array policy support is enabled.
+vault_pure_flasharray_secondary_password: "CHANGE_ME_SECONDARY_FLASHARRAY_PASSWORD"
+vault_pure_flasharray_secondary_api_token: "CHANGE_ME_SECONDARY_FLASHARRAY_API_TOKEN"

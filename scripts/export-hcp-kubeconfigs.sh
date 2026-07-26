@@ -7,15 +7,15 @@ cd "$(dirname "$0")/.."
 source scripts/lib/hcp-tenants.sh
 
 ROOT_DIR="$PWD"
-SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/hub-sno/site-a/auth/kubeconfig}"
-SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/hub-sno/site-b/auth/kubeconfig}"
+SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
+SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
 HCP_NAMESPACE="${HCP_NAMESPACE:-clusters}"
-OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/hub-sno/hcp-kubeconfigs}"
+OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/lab-sno/hcp-kubeconfigs}"
 HCP_BIN="${HCP_BIN:-}"
 
 if [[ -z "$HCP_BIN" ]]; then
-  if [[ -x "$PWD/build/hub-sno/bin/hcp" ]]; then
-    HCP_BIN="$PWD/build/hub-sno/bin/hcp"
+  if [[ -x "$PWD/build/lab-sno/bin/hcp" ]]; then
+    HCP_BIN="$PWD/build/lab-sno/bin/hcp"
   elif command -v hcp >/dev/null 2>&1; then
     HCP_BIN="$(command -v hcp)"
   else

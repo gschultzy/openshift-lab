@@ -10,7 +10,7 @@
           - "vSwitch: {{ esxi_vswitch_name }}"
           - "Port group: {{ vm_network_eth0 }}"
           - "VLAN ID on port group: {{ sno_primary_portgroup_vlan_id }}"
-          - "Note: use VLAN ID 0 if the physical switchport is access VLAN 3522; use 3522 only if the ESXi uplink is trunked."
+          - "Note: use VLAN ID 0 if the physical switchport is access VLAN 3574; use 3574 only if the ESXi uplink is trunked."
 
     - name: Validate ESXi SSH variables for port group creation
       ansible.builtin.assert:

@@ -5,7 +5,7 @@
   tasks:
     - name: Stop if FlashArray username is missing
       ansible.builtin.fail:
-        msg: "pure_flasharray_username is empty. Set it in inventories/pod22/group_vars/all/main.yml."
+        msg: "pure_flasharray_username is empty. Set it in inventories/env/group_vars/all/main.yml."
       when: pure_flasharray_username | default('') | length == 0
 
     - name: Stop if FlashArray password is missing
@@ -13,7 +13,7 @@
         msg: |
           pure_flasharray_password is empty.
 
-          Add this to inventories/pod22/group_vars/all/vault.yml using ansible-vault:
+          Add this to inventories/env/group_vars/all/vault.yml using ansible-vault:
 
             vault_pure_flasharray_password: "<FLASHARRAY_LOGIN_PASSWORD>"
 

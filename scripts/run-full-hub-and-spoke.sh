@@ -11,7 +11,7 @@ else
   exit 1
 fi
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 
 # Ask for the Ansible Vault password once, then reuse it for every playbook.
 # If ANSIBLE_VAULT_PASSWORD_FILE is already set, use that instead and do not prompt.
@@ -43,7 +43,7 @@ truthy() {
 }
 
 hub_kubeconfig_path() {
-  printf '%s\n' "${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
+  printf '%s\n' "${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
 }
 
 hub_is_up() {
@@ -94,6 +94,7 @@ run_playbook playbooks/07_configure_assisted_service.yml
 run_playbook playbooks/07_enable_baremetal_provisioning.yml
 # Site-A
 run_playbook playbooks/10_configure_bm_ad_dns.yml
+run_playbook playbooks/05_discover_idrac_nics.yml
 run_playbook playbooks/05_idrac_preflight.yml
 run_playbook playbooks/08_apply_baremetal_cluster.yml
 run_playbook playbooks/09_wait_baremetal_cluster.yml

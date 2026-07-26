@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GROUP_VARS_DIR="$ROOT_DIR/inventories/pod22/group_vars"
+GROUP_VARS_DIR="$ROOT_DIR/inventories/env/group_vars"
 ALL_DIR="$GROUP_VARS_DIR/all"
 OLD_MAIN="$GROUP_VARS_DIR/all.yml"
 NEW_MAIN="$ALL_DIR/main.yml"
@@ -42,5 +42,5 @@ fi
 
 echo
 echo "Validate Ansible can see both normal vars and vault vars:"
-echo "  ansible-inventory -i inventories/pod22/hosts.yml --list --ask-vault-pass"
-echo "  ansible-inventory -i inventories/pod22/hosts.yml --list --ask-vault-pass | jq '._meta.hostvars.localhost | {cluster_name, has_vcenter_password: has(\"vault_vcenter_password\")}'"
+echo "  ansible-inventory -i inventories/env/hosts.yml --list --ask-vault-pass"
+echo "  ansible-inventory -i inventories/env/hosts.yml --list --ask-vault-pass | jq '._meta.hostvars.localhost | {cluster_name, has_vcenter_password: has(\"vault_vcenter_password\")}'"

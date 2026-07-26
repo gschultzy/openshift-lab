@@ -22,7 +22,7 @@
         msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Export KUBECONFIG or complete the hub install first."
       when: not hub_kubeconfig_stat.stat.exists
 
-    - name: Validate Portworx policy playbook is running against hub-sno
+    - name: Validate Portworx policy playbook is running against lab-sno
       ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
       changed_when: false
       register: portworx_pure_api_server
@@ -30,7 +30,7 @@
     - name: Stop if Portworx policies are being applied to a spoke cluster
       ansible.builtin.fail:
         msg: |
-          Refusing to apply Portworx hub policies because this kubeconfig is not hub-sno.
+          Refusing to apply Portworx hub policies because this kubeconfig is not lab-sno.
 
           Current API server: {{ portworx_pure_api_server.stdout }}
           Expected: api.{{ cluster_name }}.{{ base_domain }}
@@ -76,7 +76,7 @@
           pure.json requires a FlashArray API token, not the array login password.
 
           Option 1 - generate/rotate it automatically from the FlashArray login:
-            ansible-vault edit inventories/pod22/group_vars/all/vault.yml
+            ansible-vault edit inventories/env/group_vars/all/vault.yml
             # add vault_pure_flasharray_password: "<FLASHARRAY_LOGIN_PASSWORD>"
             ./scripts/create-pure-api-token.sh
 

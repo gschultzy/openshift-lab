@@ -15,7 +15,7 @@ if [[ "${CONFIRM_DELETE_HUB:-false}" != "true" ]]; then
   cat >&2 <<MSG
 Refusing to delete the hub without confirmation.
 
-This deletes the vSphere VM named by sno_vm_name and removes build/hub-sno.
+This deletes the vSphere VM named by sno_vm_name and removes build/lab-sno.
 It does not clean Site-A/Site-B bare-metal hosts or Pure volumes.
 
 Run again with:
@@ -24,7 +24,7 @@ MSG
   exit 1
 fi
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
@@ -44,7 +44,7 @@ fi
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/04_delete_sno_hub_vm.yml \
   -e confirm_delete_hub=true
 
-rm -rf build/hub-sno
+rm -rf build/lab-sno
 
 echo
 cat <<MSG

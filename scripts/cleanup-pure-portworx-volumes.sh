@@ -7,13 +7,13 @@ set -euo pipefail
 #   px_*pvc-*
 #
 # Defaults match the POD22 lab. Override with:
-#   PURE_ARRAY=pureuser@10.23.22.50 ./scripts/cleanup-pure-portworx-volumes.sh
+#   PURE_ARRAY=pureuser@10.23.74.50 ./scripts/cleanup-pure-portworx-volumes.sh
 # or:
-#   PURE_ARRAY_USER=pureuser PURE_ARRAY_HOST=10.23.22.50 ./scripts/cleanup-pure-portworx-volumes.sh
+#   PURE_ARRAY_USER=pureuser PURE_ARRAY_HOST=10.23.74.50 ./scripts/cleanup-pure-portworx-volumes.sh
 #
 # The script opens one SSH ControlMaster connection so the Pure password is entered once.
 
-PURE_ARRAY_HOST="${PURE_ARRAY_HOST:-10.23.22.50}"
+PURE_ARRAY_HOST="${PURE_ARRAY_HOST:-10.23.74.50}"
 PURE_ARRAY_USER="${PURE_ARRAY_USER:-pureuser}"
 ARRAY="${PURE_ARRAY:-${PURE_ARRAY_USER}@${PURE_ARRAY_HOST}}"
 WORKDIR="${WORKDIR:-/tmp/pure-portworx-volume-cleanup}"

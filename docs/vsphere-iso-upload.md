@@ -6,7 +6,7 @@ This repo supports two upload methods controlled by `iso_upload_method`.
 
 ## `esxi_ssh` default
 
-This is the default for the pod-22 lab because vCenter datastore folder creation can return HTTP 404 for paths that do not already exist.
+This is the default for the environment lab because vCenter datastore folder creation can return HTTP 404 for paths that do not already exist.
 
 The playbook connects to the ESXi host over SSH, creates the datastore folder directly, uploads the ISO with SCP, and then creates the VM through vCenter.
 
@@ -24,13 +24,13 @@ iso_datastore_folder: iso/ocp
 Resulting ESXi file path:
 
 ```text
-/vmfs/volumes/datastore1/iso/ocp/hub-sno-agent.x86_64.iso
+/vmfs/volumes/datastore1/iso/ocp/lab-sno-agent.x86_64.iso
 ```
 
 Resulting vCenter ISO reference:
 
 ```text
-[datastore1] iso/ocp/hub-sno-agent.x86_64.iso
+[datastore1] iso/ocp/lab-sno-agent.x86_64.iso
 ```
 
 Requirements:
@@ -55,16 +55,16 @@ If the SNO VM has already booted with an ISO mounted, ESXi can lock that ISO fil
 Overwriting the same datastore path with `scp` can fail with:
 
 ```text
-scp: /vmfs/volumes/datastore1/iso/ocp/hub-sno-agent.x86_64.iso: Device or resource busy
+scp: /vmfs/volumes/datastore1/iso/ocp/lab-sno-agent.x86_64.iso: Device or resource busy
 ```
 
 The repo defaults to `iso_unique_per_upload: true`, which uploads each run to a
-fresh filename such as `hub-sno-agent-1782472999.x86_64.iso` and then attaches
+fresh filename such as `lab-sno-agent-1782472999.x86_64.iso` and then attaches
 that ISO to the VM. This avoids overwriting a locked file.
 
 Old ISO files can be cleaned up later from ESXi after the VM is no longer using
 them:
 
 ```bash
-ssh root@10.23.22.11 'ls -lh /vmfs/volumes/datastore1/iso/ocp'
+ssh root@10.23.74.11 'ls -lh /vmfs/volumes/datastore1/iso/ocp'
 ```

@@ -11,7 +11,7 @@ else
   exit 1
 fi
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
@@ -31,7 +31,7 @@ fi
 
 hub_kubeconfig_path() {
   printf '%s
-' "${HUB_KUBECONFIG:-$PWD/build/hub-sno/install/auth/kubeconfig}"
+' "${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
 }
 
 hub_is_up() {

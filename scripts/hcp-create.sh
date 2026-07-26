@@ -14,7 +14,7 @@ fi
 # shellcheck source=scripts/lib/hcp-tenants.sh
 source scripts/lib/hcp-tenants.sh
 
-INV="inventories/pod22/hosts.yml"
+INV="inventories/env/hosts.yml"
 ROOT_DIR="$PWD"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
@@ -32,7 +32,7 @@ else
   VAULT_ARGS=(--vault-password-file "$VAULT_PASSWORD_FILE_TMP")
 fi
 
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/hub-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
 # Common HCP namespace and storage defaults.
@@ -67,9 +67,9 @@ export HCP_IMPORT_FORCE_CLEANUP="${HCP_IMPORT_FORCE_CLEANUP:-true}"
 # bootstrap the HyperShift operator on the spoke with `hcp install render`.
 export HCP_DIRECT_HYPERSHIFT_INSTALL="${HCP_DIRECT_HYPERSHIFT_INSTALL:-true}"
 
-SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/hub-sno/site-a/auth/kubeconfig}"
-SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/hub-sno/site-b/auth/kubeconfig}"
-HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/hub-sno/hcp-kubeconfigs}"
+SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
+SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
+HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/lab-sno/hcp-kubeconfigs}"
 
 say() { printf '\n### %s\n' "$*"; }
 

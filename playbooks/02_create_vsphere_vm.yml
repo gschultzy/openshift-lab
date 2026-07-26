@@ -96,7 +96,7 @@
           - esxi_iso_path_effective is defined
         fail_msg: >-
           iso_upload_method is esxi_ssh, but one or more ESXi SSH variables are missing.
-          Check inventories/pod22/group_vars/all/main.yml and vault.yml.
+          Check inventories/env/group_vars/all/main.yml and vault.yml.
       when: iso_upload_method == 'esxi_ssh'
 
     - name: Check ESXi SSH port is reachable
@@ -306,7 +306,7 @@
         fail_msg: >-
           No datacenter named {{ vsphere_datacenter }} was found. Available datacenters are
           {{ vsphere_inventory.datacenters | map(attribute='name') | list }}.
-          Update vsphere_datacenter and vsphere_folder in inventories/pod22/group_vars/all/main.yml,
+          Update vsphere_datacenter and vsphere_folder in inventories/env/group_vars/all/main.yml,
           then rerun this playbook.
 
     - name: Build vSphere datastore and network lists for selected datacenter

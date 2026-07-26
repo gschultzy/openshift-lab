@@ -85,7 +85,7 @@ Next commands:
   oc version --client
   openshift-install version
   ansible --version
-  ansible-playbook -i inventories/pod22/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
+  ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
 
 OpenShift client/installer source:
   ${OPENSHIFT_VERSION}

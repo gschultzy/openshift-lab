@@ -54,8 +54,8 @@ hcp_tenant_site_kubeconfig() {
   local site="$1"
   local root_dir="${2:-$PWD}"
   case "$site" in
-    site-a) printf '%s/build/hub-sno/site-a/auth/kubeconfig' "$root_dir" ;;
-    site-b) printf '%s/build/hub-sno/site-b/auth/kubeconfig' "$root_dir" ;;
+    site-a) printf '%s/build/lab-sno/site-a/auth/kubeconfig' "$root_dir" ;;
+    site-b) printf '%s/build/lab-sno/site-b/auth/kubeconfig' "$root_dir" ;;
     *) echo "ERROR: unknown HCP tenant site '$site'" >&2; return 1 ;;
   esac
 }

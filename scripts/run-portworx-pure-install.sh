@@ -16,6 +16,14 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+PORTWORX_SITE_ARGS=()
+if [[ -n "${SITE:-}" ]]; then
+  case "$SITE" in
+    site-a|site-b) PORTWORX_SITE_ARGS=(-e "portworx_pure_site_filter=$SITE") ;;
+    *) echo "Invalid SITE=$SITE. Use SITE=site-a, SITE=site-b, or leave SITE unset for both." >&2; exit 2 ;;
+  esac
+fi
+
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
 else
@@ -45,20 +53,20 @@ ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.
 
 # Node prep uses MachineConfig and can reboot Site-A/Site-B masters. Do not create
 # the Portworx StorageCluster until the MCP rollout is fully complete.
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/20_apply_portworx_pure_policies.yml \
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/20_apply_portworx_pure_policies.yml "${PORTWORX_SITE_ARGS[@]}" \
   -e portworx_pure_apply_node_prep=true \
   -e portworx_pure_apply_operator=false \
   -e portworx_pure_apply_storagecluster=false
 
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/23_wait_portworx_pure_node_prep.yml
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/23_wait_portworx_pure_node_prep.yml "${PORTWORX_SITE_ARGS[@]}"
 
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/20_apply_portworx_pure_policies.yml \
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/20_apply_portworx_pure_policies.yml "${PORTWORX_SITE_ARGS[@]}" \
   -e portworx_pure_apply_node_prep=true \
   -e portworx_pure_apply_operator=true \
   -e portworx_pure_apply_storagecluster=true
 
 if [[ "${PORTWORX_ENABLE_CONSOLE_PLUGIN:-true}" == "true" ]]; then
-  ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/25_enable_portworx_console_plugin_direct.yml
+  ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/25_enable_portworx_console_plugin_direct.yml "${PORTWORX_SITE_ARGS[@]}"
 fi
 
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/21_check_portworx_pure_status.yml
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/21_check_portworx_pure_status.yml "${PORTWORX_SITE_ARGS[@]}"

@@ -1,5 +1,5 @@
 ---
-- name: Check Portworx Pure FlashArray policy and cluster status
+- name: Check site-specific Portworx Pure FlashArray policy and cluster status
   hosts: localhost
   gather_facts: false
   tasks:
@@ -13,48 +13,54 @@
         msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
       when: not hub_kubeconfig_stat.stat.exists
 
-    - name: Ensure Site-A kubeconfig output directory exists
+    - name: Select requested Portworx/Pure sites
+      ansible.builtin.set_fact:
+        portworx_pure_selected_sites: >-
+          {{
+            portworx_pure_sites
+            if (portworx_pure_site_filter | default('') | length == 0)
+            else (portworx_pure_sites | selectattr('name', 'equalto', portworx_pure_site_filter) | list)
+          }}
+
+    - name: Validate selected sites
+      ansible.builtin.assert:
+        that:
+          - portworx_pure_selected_sites | length > 0
+        fail_msg: "No Portworx site matched '{{ portworx_pure_site_filter }}'."
+
+    - name: Ensure selected spoke kubeconfig directories exist
       ansible.builtin.file:
-        path: "{{ site_a_kubeconfig_file | dirname }}"
+        path: "{{ item.kubeconfig_file | dirname }}"
         state: directory
         mode: "0755"
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
 
-    - name: Ensure Site-B kubeconfig output directory exists
-      ansible.builtin.file:
-        path: "{{ site_b_kubeconfig_file | dirname }}"
-        state: directory
-        mode: "0755"
-
-    - name: Extract Site-A admin kubeconfig from RHACM hub
+    - name: Extract selected spoke admin kubeconfigs from RHACM hub
       ansible.builtin.shell: |
         set -euo pipefail
-        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
-        chmod 0600 {{ site_a_kubeconfig_file }}
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ item.managed_cluster }} \
+          get secret {{ item.managed_cluster }}-admin-kubeconfig \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ item.kubeconfig_file | quote }}
+        chmod 0600 {{ item.kubeconfig_file | quote }}
       args:
         executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
       changed_when: true
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
 
-    - name: Extract Site-B admin kubeconfig from RHACM hub
+    - name: Show hub site-specific policy status
       ansible.builtin.shell: |
         set -euo pipefail
-        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
-        chmod 0600 {{ site_b_kubeconfig_file }}
-      args:
-        executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: true
-
-    - name: Show hub policy status
-      ansible.builtin.shell: |
-        set -euo pipefail
-        echo '# Managed clusters'
-        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster -l {{ portworx_pure_policy_cluster_label_key }}={{ portworx_pure_policy_cluster_label_value }} -o wide || true
+        echo '# Managed clusters and dedicated array-placement labels'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster \
+          -L {{ portworx_pure_policy_cluster_label_key }} -o wide || true
         echo
-        echo '# Policies'
-        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ portworx_pure_policy_namespace }} get policy,placement,placementdecision,placementbinding,managedclustersetbinding || true
+        echo '# Site-specific Portworx policies'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ portworx_pure_policy_namespace }} \
+          get policy,placement,placementdecision,placementbinding,managedclustersetbinding || true
       args:
         executable: /bin/bash
       changed_when: false
@@ -64,76 +70,71 @@
       ansible.builtin.debug:
         var: portworx_pure_hub_status.stdout_lines
 
-    - name: Show Site-A Portworx/Pure status
+    - name: Check Portworx and dedicated FlashArray assignment on selected sites
       ansible.builtin.shell: |
         set -euo pipefail
-        echo '# Site-A MachineConfigPools'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get mcp
+        K={{ item.kubeconfig_file | quote }}
+        REQUIRED={{ portworx_pure_status_require_install | default(true) | bool | lower }}
+
+        echo '# {{ item.display_name }} expected backend'
+        echo 'Array: {{ item.flasharray_name }}'
+        echo 'Management endpoint: {{ item.flasharray_mgmt_endpoint }}'
         echo
-        echo '# Site-A Portworx namespace resources'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} get subscription -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} get csv -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} get pods -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} get storagecluster -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} get secret px-pure-secret 2>/dev/null || true
+        echo '# MachineConfigPools and nodes'
+        oc --kubeconfig "$K" get mcp
+        oc --kubeconfig "$K" get nodes -o wide
         echo
-        echo '# Site-A Portworx StorageCluster summary'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} describe storagecluster {{ portworx_storagecluster_name }} 2>/dev/null | egrep -i 'Name:|Namespace:|Status:|Phase:|Reason:|Message:|Warning|Error|Cloud|Pure|Secret|Events:' -A3 || true
+        echo '# Portworx namespace resources'
+        oc --kubeconfig "$K" -n {{ portworx_namespace }} get subscription,csv,pods,storagecluster -o wide 2>/dev/null || true
+
+        if ! oc --kubeconfig "$K" -n {{ portworx_namespace }} get secret px-pure-secret >/dev/null 2>&1; then
+          echo 'px-pure-secret is not present.'
+          if [ "$REQUIRED" = true ]; then
+            echo 'ERROR: Full Portworx install is required but px-pure-secret is missing.' >&2
+            exit 1
+          fi
+          echo 'Node-prep-only status requested; skipping array assignment validation.'
+          exit 0
+        fi
+
+        actual_array=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get secret px-pure-secret \
+          -o jsonpath='{.data.pure\.json}' | base64 -d | jq -r '.FlashArrays[].MgmtEndPoint')
         echo
-        echo '# Site-A StorageClasses'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get sc || true
+        echo '# px-pure-secret endpoint validation'
+        echo "Configured endpoint(s): ${actual_array}"
+        if [ "$actual_array" != "{{ item.flasharray_mgmt_endpoint }}" ]; then
+          echo 'ERROR: The cluster is not assigned exclusively to its expected FlashArray.' >&2
+          exit 1
+        fi
+
+        if [ "$REQUIRED" = true ]; then
+          phase=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get storagecluster {{ portworx_storagecluster_name }} -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          echo "StorageCluster phase: ${phase:-missing}"
+          if [ "$phase" != Running ]; then
+            echo 'ERROR: Portworx StorageCluster is not Running.' >&2
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} describe storagecluster {{ portworx_storagecluster_name }} || true
+            exit 1
+          fi
+        fi
+
         echo
-        echo '# Site-A stale OCM APIService check'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get apiservice 2>/dev/null | egrep -i 'clusterview|proxy.open-cluster-management|open-cluster-management' || true
+        echo '# StorageClasses'
+        oc --kubeconfig "$K" get sc || true
         echo
-        echo '# Site-A OpenShift Console plugins'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}' 2>/dev/null || true
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} get consoleplugin {{ portworx_openshift_console_plugin_name | default('portworx') }} -o wide 2>/dev/null || true
-        echo
-        echo '# Site-A Portworx console plugin pods'
-        oc --kubeconfig {{ site_a_kubeconfig_file | quote }} -n {{ portworx_namespace }} get pods 2>/dev/null | egrep -i 'NAME|px-plugin|plugin|proxy|cache' || true
+        echo '# Console plugin'
+        oc --kubeconfig "$K" get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}' 2>/dev/null || true
+        oc --kubeconfig "$K" get consoleplugin {{ portworx_openshift_console_plugin_name | default('portworx') }} -o wide 2>/dev/null || true
       args:
         executable: /bin/bash
       changed_when: false
-      register: site_a_portworx_pure_status
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }} -> {{ item.flasharray_name }}"
+      register: portworx_pure_site_status
 
-    - name: Print Site-A Portworx/Pure status
+    - name: Print selected-site Portworx/Pure status
       ansible.builtin.debug:
-        var: site_a_portworx_pure_status.stdout_lines
-
-    - name: Show Site-B Portworx/Pure status
-      ansible.builtin.shell: |
-        set -euo pipefail
-        echo '# Site-B MachineConfigPools'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get mcp
-        echo
-        echo '# Site-B Portworx namespace resources'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} get subscription -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} get csv -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} get pods -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} get storagecluster -o wide 2>/dev/null || true
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} get secret px-pure-secret 2>/dev/null || true
-        echo
-        echo '# Site-B Portworx StorageCluster summary'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} describe storagecluster {{ portworx_storagecluster_name }} 2>/dev/null | egrep -i 'Name:|Namespace:|Status:|Phase:|Reason:|Message:|Warning|Error|Cloud|Pure|Secret|Events:' -A3 || true
-        echo
-        echo '# Site-B StorageClasses'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get sc || true
-        echo
-        echo '# Site-B stale OCM APIService check'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get apiservice 2>/dev/null | egrep -i 'clusterview|proxy.open-cluster-management|open-cluster-management' || true
-        echo
-        echo '# Site-B OpenShift Console plugins'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}' 2>/dev/null || true
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} get consoleplugin {{ portworx_openshift_console_plugin_name | default('portworx') }} -o wide 2>/dev/null || true
-        echo
-        echo '# Site-B Portworx console plugin pods'
-        oc --kubeconfig {{ site_b_kubeconfig_file | quote }} -n {{ portworx_namespace }} get pods 2>/dev/null | egrep -i 'NAME|px-plugin|plugin|proxy|cache' || true
-      args:
-        executable: /bin/bash
-      changed_when: false
-      register: site_b_portworx_pure_status
-
-    - name: Print Site-B Portworx/Pure status
-      ansible.builtin.debug:
-        var: site_b_portworx_pure_status.stdout_lines
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ portworx_pure_site_status.results }}"
+      loop_control:
+        label: "{{ item.item.display_name }}"

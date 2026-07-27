@@ -1,8 +1,9 @@
+{% set _policy_suffix = portworx_pure_policy_suffix | default('') %}
 {% if portworx_pure_apply_hcp_storageclasses | default(true) | bool %}
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: portworx-hcp-storageclasses
+  name: portworx-hcp-storageclasses{{ _policy_suffix }}
   namespace: {{ portworx_pure_policy_namespace }}
   annotations:
     policy.open-cluster-management.io/standards: Portworx Pure FlashArray
@@ -16,7 +17,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: portworx-hcp-storageclasses
+          name: portworx-hcp-storageclasses{{ _policy_suffix }}
         spec:
           remediationAction: {{ portworx_pure_policy_remediation_action }}
           severity: high

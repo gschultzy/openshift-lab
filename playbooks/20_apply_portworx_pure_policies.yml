@@ -1,5 +1,5 @@
 ---
-- name: Apply RHACM policies for Portworx Enterprise with Everpure/Pure FlashArray
+- name: Apply site-specific RHACM policies for Portworx Enterprise with Pure FlashArray
   hosts: localhost
   gather_facts: false
   vars:
@@ -19,10 +19,10 @@
 
     - name: Stop if hub kubeconfig is missing
       ansible.builtin.fail:
-        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Export KUBECONFIG or complete the hub install first."
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Complete or repair the hub first."
       when: not hub_kubeconfig_stat.stat.exists
 
-    - name: Validate Portworx policy playbook is running against {{ cluster_name }}
+    - name: Validate Portworx policy playbook is running against the hub
       ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
       changed_when: false
       register: portworx_pure_api_server
@@ -30,184 +30,81 @@
     - name: Stop if Portworx policies are being applied to a spoke cluster
       ansible.builtin.fail:
         msg: |
-          Refusing to apply Portworx hub policies because this kubeconfig is not {{ cluster_name }}.
-
+          Refusing to apply RHACM Portworx policies because this kubeconfig is not {{ cluster_name }}.
           Current API server: {{ portworx_pure_api_server.stdout }}
           Expected: api.{{ cluster_name }}.{{ base_domain }}
-
-          Fix your context:
-            export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
-            export KUBECONFIG=$HUB_KUBECONFIG
       when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in portworx_pure_api_server.stdout"
 
-    - name: Check for generated FlashArray API token file
-      ansible.builtin.stat:
-        path: "{{ pure_flasharray_generated_token_file }}"
-      register: pure_flasharray_generated_token_stat
-      no_log: true
-
-    - name: Load generated FlashArray API token if present
-      ansible.builtin.include_vars:
-        file: "{{ pure_flasharray_generated_token_file }}"
-        name: pure_flasharray_generated_token_vars
-      when: pure_flasharray_generated_token_stat.stat.exists
-      no_log: true
-
-    - name: Select effective FlashArray API token
+    - name: Select requested Portworx/Pure sites
       ansible.builtin.set_fact:
-        pure_flasharray_effective_api_token: >-
+        portworx_pure_selected_sites: >-
           {{
-            pure_flasharray_api_token
-            if (pure_flasharray_api_token | default('') | length > 0)
-            else (pure_flasharray_generated_token_vars.pure_flasharray_api_token | default(''))
+            portworx_pure_sites
+            if (portworx_pure_site_filter | default('') | length == 0)
+            else (
+              portworx_pure_sites
+              | selectattr('name', 'equalto', portworx_pure_site_filter)
+              | list
+            )
           }}
-      no_log: true
 
-    - name: Make effective FlashArray API token available to rendered policies
-      ansible.builtin.set_fact:
-        pure_flasharray_api_token: "{{ pure_flasharray_effective_api_token }}"
-      no_log: true
+    - name: Validate requested Portworx/Pure site filter
+      ansible.builtin.assert:
+        that:
+          - portworx_pure_selected_sites | length > 0
+        fail_msg: >-
+          No Portworx site matched '{{ portworx_pure_site_filter }}'.
+          Valid values are: {{ portworx_pure_sites | map(attribute='name') | join(', ') }}.
 
-    - name: Stop if full Portworx install requested without FlashArray API token
+    - name: Warn that Portworx Enterprise 3.6.1.1 is a POC configuration on OpenShift 4.22
+      ansible.builtin.debug:
+        msg:
+          - "WARNING: This lab pins Portworx Enterprise 3.6.1.1 on OpenShift {{ ocp_release_version }}."
+          - "The published PE 3.6.1 support matrix lists OCP through 4.21; obtain Everpure support confirmation for OCP 4.22 before production use."
+      when:
+        - ocp_version == '4.22'
+        - portworx_poc_allow_ocp_4_22 | default(false) | bool
+
+    - name: Stop unsupported OCP 4.22 deployment unless POC acknowledgement is enabled
       ansible.builtin.fail:
         msg: |
-          portworx_pure_apply_storagecluster=true but no FlashArray API token is available.
-
-          pure.json requires a FlashArray API token, not the array login password.
-
-          Option 1 - generate/rotate it automatically from the FlashArray login:
-            ansible-vault edit inventories/env/group_vars/all/vault.yml
-            # add vault_pure_flasharray_password: "<FLASHARRAY_LOGIN_PASSWORD>"
-            ./scripts/create-pure-api-token.sh
-
-          Option 2 - supply an existing token manually in vault.yml:
-            vault_pure_flasharray_api_token: "<FLASHARRAY_API_TOKEN>"
-
-          For node prep only, run:
-            ./scripts/run-portworx-pure-node-prep.sh
+          Portworx Enterprise 3.6.1.1 is not listed in the published support matrix for OpenShift 4.22.
+          For a lab-only POC, set portworx_poc_allow_ocp_4_22: true in main.yml.
       when:
-        - portworx_pure_apply_storagecluster | default(true) | bool
-        - pure_flasharray_effective_api_token | default('') | length == 0
+        - ocp_version == '4.22'
+        - not (portworx_poc_allow_ocp_4_22 | default(false) | bool)
 
-    - name: Confirm managed clusters exist on the hub
-      ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster {{ item }}
-      loop: "{{ portworx_pure_managed_clusters }}"
-      changed_when: false
-
-    - name: Create rendered policy directory
-      ansible.builtin.file:
-        path: "{{ portworx_pure_policy_rendered_dir }}"
-        state: directory
-        mode: "0755"
-
-    - name: Clean rendered Portworx Pure policy manifests from previous runs
+    - name: Ensure Portworx/Pure RHACM policy namespace exists
       ansible.builtin.shell: |
         set -euo pipefail
-        rm -f {{ portworx_pure_policy_rendered_dir }}/*.yaml
+        oc --kubeconfig {{ hub_kubeconfig | quote }} create namespace {{ portworx_pure_policy_namespace }} \
+          --dry-run=client -o yaml | oc --kubeconfig {{ hub_kubeconfig | quote }} apply -f -
       args:
         executable: /bin/bash
-      changed_when: false
-
-    - name: Ensure Portworx Pure policy namespace exists on hub
-      ansible.builtin.command: oc create namespace {{ portworx_pure_policy_namespace }} --dry-run=client -o yaml
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: false
-      register: portworx_pure_policy_namespace_manifest
-
-    - name: Apply Portworx Pure policy namespace on hub
-      ansible.builtin.command: oc apply -f -
-      args:
-        stdin: "{{ portworx_pure_policy_namespace_manifest.stdout }}"
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
       changed_when: true
 
-    - name: Label managed clusters for Portworx Pure placement
-      ansible.builtin.command: >-
-        oc label managedcluster {{ item }}
-        {{ portworx_pure_policy_cluster_label_key }}={{ portworx_pure_policy_cluster_label_value }}
-        --overwrite
-      loop: "{{ portworx_pure_managed_clusters }}"
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: true
+    - name: Apply one isolated Portworx/Pure policy bundle per site
+      ansible.builtin.include_tasks: tasks/apply_portworx_pure_site.yml
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        loop_var: portworx_site
+        label: "{{ portworx_site.display_name }} -> {{ portworx_site.flasharray_name }}"
 
-    - name: Ensure ManagedClusterSetBindings exist in Portworx Pure policy namespace
+    - name: Show final Portworx/Pure RHACM policy status
       ansible.builtin.shell: |
         set -euo pipefail
-        cat <<'EOM' | oc apply -f -
-        apiVersion: cluster.open-cluster-management.io/v1beta2
-        kind: ManagedClusterSetBinding
-        metadata:
-          name: {{ item }}
-          namespace: {{ portworx_pure_policy_namespace }}
-        spec:
-          clusterSet: {{ item }}
-        EOM
-      args:
-        executable: /bin/bash
-      loop: "{{ portworx_pure_managed_clustersets | unique }}"
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: true
-
-    - name: Render Portworx Pure policy manifests
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../{{ item }}"
-        dest: "{{ portworx_pure_policy_rendered_dir }}/{{ item | basename | regex_replace('\\.j2$', '') }}"
-        mode: "0644"
-      loop: "{{ portworx_pure_policy_templates }}"
-
-    - name: Validate rendered Portworx Pure policy manifests before applying
-      ansible.builtin.shell: |
-        set -euo pipefail
-        for f in {{ portworx_pure_policy_rendered_dir }}/*.yaml; do
-          if [ -s "$f" ] && grep -Eq '^(apiVersion|kind):' "$f"; then
-            echo "Validating $f"
-            oc apply --dry-run=client -f "$f" >/dev/null
-          else
-            echo "Skipping empty/non-manifest $f"
-          fi
-        done
-      args:
-        executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: false
-
-    - name: Apply non-empty Portworx Pure policy manifests to hub
-      ansible.builtin.shell: |
-        set -euo pipefail
-        for f in {{ portworx_pure_policy_rendered_dir }}/*.yaml; do
-          if [ -s "$f" ] && grep -Eq '^(apiVersion|kind):' "$f"; then
-            echo "Applying $f"
-            oc apply -f "$f"
-          else
-            echo "Skipping empty/non-manifest $f"
-          fi
-        done
-      args:
-        executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: true
-
-    - name: Show Portworx Pure policy status
-      ansible.builtin.shell: |
-        set -euo pipefail
-        echo '# ManagedClusters'
-        oc get managedcluster -l {{ portworx_pure_policy_cluster_label_key }}={{ portworx_pure_policy_cluster_label_value }} -o wide
+        echo '# ManagedClusters and site labels'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster \
+          -L {{ portworx_pure_policy_cluster_label_key }} -o wide
         echo
-        echo '# Portworx Pure policies'
-        oc -n {{ portworx_pure_policy_namespace }} get managedclustersetbinding,placement,placementdecision,policy,placementbinding
+        echo '# Site-specific Portworx policies'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ portworx_pure_policy_namespace }} \
+          get policy,placement,placementdecision,placementbinding,managedclustersetbinding
       args:
         executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
       changed_when: false
       register: portworx_pure_policy_status
 
-    - name: Print Portworx Pure policy status
+    - name: Print Portworx/Pure policy status
       ansible.builtin.debug:
         var: portworx_pure_policy_status.stdout_lines

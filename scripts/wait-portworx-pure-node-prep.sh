@@ -16,6 +16,14 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+PORTWORX_SITE_ARGS=()
+if [[ -n "${SITE:-}" ]]; then
+  case "$SITE" in
+    site-a|site-b) PORTWORX_SITE_ARGS=(-e "portworx_pure_site_filter=$SITE") ;;
+    *) echo "Invalid SITE=$SITE. Use SITE=site-a, SITE=site-b, or leave SITE unset for both." >&2; exit 2 ;;
+  esac
+fi
+
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
 else
@@ -39,4 +47,4 @@ hub_kubeconfig_path() {
 export KUBECONFIG="$(hub_kubeconfig_path)"
 
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/23_wait_portworx_pure_node_prep.yml
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/23_wait_portworx_pure_node_prep.yml "${PORTWORX_SITE_ARGS[@]}"

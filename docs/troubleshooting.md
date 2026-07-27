@@ -138,34 +138,40 @@ Disable StorageCluster enforcement while cleaning Pure or rebuilding nodes:
 ```bash
 HUB=build/{{ cluster_name }}/install/auth/kubeconfig
 
-oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
-  --type=merge \
-  -p '{"spec":{"disabled":true}}'
+for site in site-a site-b; do
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+    --type=merge \
+    -p '{"spec":{"disabled":true}}'
+done
 ```
 
 Enable it again:
 
 ```bash
-oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
-  --type=merge \
-  -p '{"spec":{"disabled":false}}'
+for site in site-a site-b; do
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+    --type=merge \
+    -p '{"spec":{"disabled":false}}'
+done
 ```
 
 Enable all Portworx policies if you disabled more than one:
 
 ```bash
-for p in \
-  portworx-pure-node-prep \
-  portworx-operator \
-  portworx-pure-secret \
-  portworx-flasharray-storagecluster \
-  portworx-openshift-console-plugin \
-  portworx-hcp-storageclasses
- do
-  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "$p" \
-    --type=merge \
-    -p '{"spec":{"disabled":false}}'
- done
+for site in site-a site-b; do
+  for base in \
+    portworx-pure-node-prep \
+    portworx-operator \
+    portworx-pure-secret \
+    portworx-flasharray-storagecluster \
+    portworx-openshift-console-plugin \
+    portworx-hcp-storageclasses
+  do
+    oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "${base}-${site}" \
+      --type=merge \
+      -p '{"spec":{"disabled":false}}'
+  done
+done
 ```
 
 ---
@@ -197,15 +203,19 @@ First disable the StorageCluster policy:
 
 ```bash
 HUB=build/{{ cluster_name }}/install/auth/kubeconfig
-oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
-  --type=merge \
-  -p '{"spec":{"disabled":true}}'
+for site in site-a site-b; do
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+    --type=merge \
+    -p '{"spec":{"disabled":true}}'
+done
 ```
 
 Then clean the old Pure volumes:
 
 ```bash
-./scripts/cleanup-pure-portworx-volumes.sh
+SITE=site-a ./scripts/cleanup-pure-portworx-volumes.sh
+# or
+SITE=site-b ./scripts/cleanup-pure-portworx-volumes.sh
 ```
 
 The script removes matching Portworx-created Pure volumes:
@@ -220,9 +230,11 @@ If Pure SafeMode blocks immediate eradication, make sure the volumes are at leas
 Re-enable StorageCluster enforcement:
 
 ```bash
-oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
-  --type=merge \
-  -p '{"spec":{"disabled":false}}'
+for site in site-a site-b; do
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+    --type=merge \
+    -p '{"spec":{"disabled":false}}'
+done
 ```
 
 Watch Portworx:

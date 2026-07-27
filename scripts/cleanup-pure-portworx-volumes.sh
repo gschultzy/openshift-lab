@@ -11,14 +11,30 @@ source "$ROOT_DIR/scripts/lib/inventory-env.sh"
 #   pxclouddrive-*
 #   px_*pvc-*
 #
-# Defaults are loaded from pure_flasharray_mgmt_endpoint and
-# pure_flasharray_username in main.yml. Override with PURE_ARRAY or the
+# Select the dedicated array with SITE=site-a or SITE=site-b. Site-A is the
+# default for backward compatibility. Override with PURE_ARRAY or the
 # PURE_ARRAY_USER / PURE_ARRAY_HOST environment variables when required.
 #
 # The script opens one SSH ControlMaster connection so the Pure password is entered once.
 
-PURE_ARRAY_HOST="${PURE_ARRAY_HOST:-$(inventory_value pure_flasharray_mgmt_endpoint)}"
-PURE_ARRAY_USER="${PURE_ARRAY_USER:-$(inventory_value pure_flasharray_username)}"
+SITE="${SITE:-site-a}"
+case "$SITE" in
+  site-a)
+    DEFAULT_ARRAY_HOST="$(inventory_value site_a_pure_flasharray_mgmt_endpoint)"
+    DEFAULT_ARRAY_USER="$(inventory_value site_a_pure_flasharray_username)"
+    ;;
+  site-b)
+    DEFAULT_ARRAY_HOST="$(inventory_value site_b_pure_flasharray_mgmt_endpoint)"
+    DEFAULT_ARRAY_USER="$(inventory_value site_b_pure_flasharray_username)"
+    ;;
+  *)
+    echo "Invalid SITE=$SITE. Use SITE=site-a or SITE=site-b." >&2
+    exit 2
+    ;;
+esac
+
+PURE_ARRAY_HOST="${PURE_ARRAY_HOST:-$DEFAULT_ARRAY_HOST}"
+PURE_ARRAY_USER="${PURE_ARRAY_USER:-$DEFAULT_ARRAY_USER}"
 ARRAY="${PURE_ARRAY:-${PURE_ARRAY_USER}@${PURE_ARRAY_HOST}}"
 WORKDIR="${WORKDIR:-/tmp/pure-portworx-volume-cleanup}"
 CONFIRM_TOKEN="DELETE_PORTWORX_FLASHARRAY_VOLUMES"
@@ -43,6 +59,7 @@ trap close_control_socket EXIT
 cat <<MSG
 Pure FlashArray Portworx volume cleanup
 =======================================
+Site:    $SITE
 Array:   $ARRAY
 Workdir: $WORKDIR
 Targets: pxclouddrive-* and px_*pvc-*

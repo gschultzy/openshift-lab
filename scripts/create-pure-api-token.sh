@@ -16,6 +16,14 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+PORTWORX_SITE_ARGS=()
+if [[ -n "${SITE:-}" ]]; then
+  case "$SITE" in
+    site-a|site-b) PORTWORX_SITE_ARGS=(-e "portworx_pure_site_filter=$SITE") ;;
+    *) echo "Invalid SITE=$SITE. Use SITE=site-a, SITE=site-b, or leave SITE unset for both." >&2; exit 2 ;;
+  esac
+fi
+
 if ! ansible-galaxy collection list purestorage.flasharray >/dev/null 2>&1; then
   echo "purestorage.flasharray collection is missing; installing requirements.yml" >&2
   ansible-galaxy collection install -r requirements.yml
@@ -54,5 +62,5 @@ fi
 # Default to recreate=true so this script is deterministic for automation.
 PURE_TOKEN_RECREATE="${PURE_TOKEN_RECREATE:-true}"
 
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/22_create_pure_flasharray_api_token.yml \
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/22_create_pure_flasharray_api_token.yml "${PORTWORX_SITE_ARGS[@]}" \
   -e "pure_flasharray_token_recreate=${PURE_TOKEN_RECREATE}"

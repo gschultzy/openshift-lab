@@ -16,6 +16,19 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+SITE="${SITE:-}"
+PORTWORX_SITE_ARGS=()
+case "$SITE" in
+  "") ;;
+  site-a|site-b)
+    PORTWORX_SITE_ARGS=(-e "portworx_pure_site_filter=$SITE")
+    ;;
+  *)
+    echo "Invalid SITE='$SITE'. Use SITE=site-a, SITE=site-b, or leave SITE unset for both." >&2
+    exit 2
+    ;;
+esac
+
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
 else
@@ -39,11 +52,11 @@ ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.
 # Re-render and re-apply the Pure secret + replacement KDS StorageCluster policy
 # without touching node-prep or reinstalling the operator. The same CR name is used,
 # so this overwrites the StorageCluster definition on Site-A/Site-B when the policy is enforced.
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/20_apply_portworx_pure_policies.yml \
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/20_apply_portworx_pure_policies.yml "${PORTWORX_SITE_ARGS[@]}" \
   -e portworx_pure_apply_node_prep=false \
   -e portworx_pure_apply_operator=false \
   -e portworx_pure_apply_storagecluster=true \
   -e portworx_enable_openshift_console_plugin=false \
   -e portworx_pure_apply_hcp_storageclasses=true
 
-ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/21_check_portworx_pure_status.yml
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/21_check_portworx_pure_status.yml "${PORTWORX_SITE_ARGS[@]}"

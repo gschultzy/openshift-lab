@@ -29,16 +29,15 @@ vault_ad_password: "CHANGE_ME"
 vault_idrac_username: "pureuser"
 vault_idrac_password: "CHANGE_ME"
 
-# Pure FlashArray / Everpure API token for Portworx pure.json.
-# Generate this on the FlashArray, for example with: pureadmin create --api-token
-# Do not store the array password in git.
-vault_pure_flasharray_api_token: "CHANGE_ME_FLASHARRAY_API_TOKEN"
+# Dedicated Pure FlashArray credentials for Portworx.
+# Store passwords/tokens only in this encrypted Vault file. The token-generation
+# script writes generated API tokens under build/pure/ with mode 0600.
+vault_site_a_pure_flasharray_password: "CHANGE_ME_SITE_A_FLASHARRAY_PASSWORD"
+vault_site_a_pure_flasharray_api_token: ""
+vault_site_b_pure_flasharray_password: "CHANGE_ME_SITE_B_FLASHARRAY_PASSWORD"
+vault_site_b_pure_flasharray_api_token: ""
 
-# Everpure/Pure FlashArray credentials for automated API token creation.
-# Store the login password only in Ansible Vault. The generated API token is written
-# to the path in pure_flasharray_generated_token_file with mode 0600.
-vault_pure_flasharray_password: "CHANGE_ME_FLASHARRAY_PASSWORD"
+# Legacy aliases are still accepted by main.yml during migration:
+# vault_pure_flasharray_password / vault_pure_flasharray_api_token       -> Site-A
+# vault_pure_flasharray_secondary_password / secondary_api_token         -> Site-B
 
-# Staged for the second FlashArray; not consumed until multi-array policy support is enabled.
-vault_pure_flasharray_secondary_password: "CHANGE_ME_SECONDARY_FLASHARRAY_PASSWORD"
-vault_pure_flasharray_secondary_api_token: "CHANGE_ME_SECONDARY_FLASHARRAY_API_TOKEN"

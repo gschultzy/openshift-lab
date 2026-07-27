@@ -1,0 +1,62 @@
+---
+- name: "Validate FlashArray username for {{ portworx_site.display_name }}"
+  ansible.builtin.assert:
+    that:
+      - portworx_site.flasharray_username | default('') | length > 0
+    fail_msg: >-
+      FlashArray username is empty for {{ portworx_site.display_name }}.
+      Set the site-specific username in inventories/env/group_vars/all/main.yml.
+
+- name: "Validate FlashArray password for {{ portworx_site.display_name }}"
+  ansible.builtin.assert:
+    that:
+      - portworx_site.flasharray_password | default('') | length > 0
+    fail_msg: |
+      FlashArray login password is empty for {{ portworx_site.display_name }}.
+      Add this site-specific value using ansible-vault:
+        vault_{{ portworx_site.name | replace('-', '_') }}_pure_flasharray_password: "<PASSWORD>"
+  no_log: true
+
+- name: "Ensure generated token directory exists for {{ portworx_site.display_name }}"
+  ansible.builtin.file:
+    path: "{{ portworx_site.generated_token_file | dirname }}"
+    state: directory
+    mode: "0700"
+
+- name: "Create or rotate FlashArray API token for {{ portworx_site.display_name }}"
+  purestorage.flasharray.purefa_token:
+    fa_url: "{{ portworx_site.flasharray_mgmt_endpoint }}"
+    username: "{{ portworx_site.flasharray_username }}"
+    password: "{{ portworx_site.flasharray_password }}"
+    state: present
+    recreate: "{{ pure_flasharray_token_recreate | default(portworx_site.token_recreate) | bool }}"
+    timeout: "{{ portworx_site.token_timeout | default(omit, true) }}"
+    disable_warnings: true
+  register: portworx_site_token_result
+  no_log: true
+
+- name: "Stop if {{ portworx_site.display_name }} token was not returned"
+  ansible.builtin.fail:
+    msg: |
+      The FlashArray module did not return a token for {{ portworx_site.display_name }}.
+      Run with token recreation enabled:
+        PURE_TOKEN_RECREATE=true SITE={{ portworx_site.name }} ./scripts/create-pure-api-token.sh
+  when: portworx_site_token_result.purefa_token | default('') | length == 0
+
+- name: "Save generated FlashArray API token for {{ portworx_site.display_name }}"
+  ansible.builtin.copy:
+    dest: "{{ portworx_site.generated_token_file }}"
+    mode: "0600"
+    content: |
+      ---
+      # Generated for {{ portworx_site.display_name }} / {{ portworx_site.flasharray_name }}.
+      # This file is under build/ and must not be committed.
+      pure_flasharray_api_token: "{{ portworx_site_token_result.purefa_token }}"
+  no_log: true
+
+- name: "Print token generation summary for {{ portworx_site.display_name }}"
+  ansible.builtin.debug:
+    msg:
+      - "FlashArray API token created/rotated for {{ portworx_site.display_name }}."
+      - "Array: {{ portworx_site.flasharray_name }} ({{ portworx_site.flasharray_mgmt_endpoint }})"
+      - "Token file: {{ portworx_site.generated_token_file }}"

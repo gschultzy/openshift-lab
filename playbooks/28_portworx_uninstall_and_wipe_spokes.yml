@@ -36,7 +36,9 @@
     - name: Disable RHACM Portworx StorageCluster policy so it does not immediately recreate Portworx
       ansible.builtin.shell: |
         set -euo pipefail
-        oc -n {{ portworx_pure_policy_namespace }} patch policy portworx-flasharray-storagecluster --type=merge -p '{"spec":{"disabled":true}}' 2>/dev/null || true
+        for site in site-a site-b; do
+          oc -n {{ portworx_pure_policy_namespace }} patch policy "portworx-flasharray-storagecluster-${site}" --type=merge -p '{"spec":{"disabled":true}}' 2>/dev/null || true
+        done
       args:
         executable: /bin/bash
       environment:

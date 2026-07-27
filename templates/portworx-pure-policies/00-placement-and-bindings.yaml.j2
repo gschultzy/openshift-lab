@@ -1,3 +1,4 @@
+{% set _policy_suffix = portworx_pure_policy_suffix | default('') %}
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -62,30 +63,25 @@ subjects:
 {% if apply_node_prep %}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-pure-node-prep
+    name: portworx-pure-node-prep{{ _policy_suffix }}
 {% endif %}
 {% if apply_operator %}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-operator
+    name: portworx-operator{{ _policy_suffix }}
 {% endif %}
 {% if apply_storagecluster %}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-pure-secret
+    name: portworx-pure-secret{{ _policy_suffix }}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-flasharray-storagecluster
+    name: portworx-flasharray-storagecluster{{ _policy_suffix }}
 {% endif %}
 {% if apply_console_plugin %}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-openshift-console-plugin
-{% endif %}
-{% if apply_hcp_storageclasses %}
-  - apiGroup: policy.open-cluster-management.io
-    kind: Policy
-    name: portworx-hcp-storageclasses
+    name: portworx-openshift-console-plugin{{ _policy_suffix }}
 {% endif %}
 ---
 {% endif %}
@@ -93,7 +89,7 @@ subjects:
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: portworx-hcp-storageclasses-binding
+  name: portworx-hcp-storageclasses-binding{{ _policy_suffix }}
   namespace: {{ portworx_pure_policy_namespace }}
 placementRef:
   apiGroup: cluster.open-cluster-management.io
@@ -102,5 +98,5 @@ placementRef:
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-hcp-storageclasses
+    name: portworx-hcp-storageclasses{{ _policy_suffix }}
 {% endif %}

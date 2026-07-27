@@ -2,18 +2,13 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-
 # shellcheck source=scripts/lib/inventory-env.sh
 source scripts/lib/inventory-env.sh
 
 HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
-if [[ ! -f "$HUB_KUBECONFIG" ]]; then
-  echo "Hub kubeconfig not found: $HUB_KUBECONFIG" >&2
-  exit 1
-fi
-
+[[ -f "$HUB_KUBECONFIG" ]] || { echo "Hub kubeconfig not found: $HUB_KUBECONFIG" >&2; exit 1; }
 ./scripts/ensure-hub-kubeconfig.sh >/dev/null 2>&1 || true
 
 api_server="$(oc --kubeconfig "$HUB_KUBECONFIG" whoami --show-server)"
@@ -25,16 +20,19 @@ if [[ "$api_server" != *"$ENV_HUB_API_HOST"* ]]; then
 fi
 
 ns="portworx-pure-policies"
-placement="portworx-pure-placement"
-
 oc --kubeconfig "$HUB_KUBECONFIG" get ns "$ns" >/dev/null
-oc --kubeconfig "$HUB_KUBECONFIG" -n "$ns" get placement "$placement" >/dev/null
 
-cat <<EOF_YAML | oc --kubeconfig "$HUB_KUBECONFIG" apply -f -
+for site in site-a site-b; do
+  placement="portworx-pure-${site}-placement"
+  binding="portworx-pure-${site}-binding"
+  sc_binding="portworx-hcp-storageclasses-binding-${site}"
+  oc --kubeconfig "$HUB_KUBECONFIG" -n "$ns" get placement "$placement" >/dev/null
+
+  cat <<EOF_YAML | oc --kubeconfig "$HUB_KUBECONFIG" apply -f -
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: portworx-pure-binding
+  name: ${binding}
   namespace: ${ns}
 placementRef:
   apiGroup: cluster.open-cluster-management.io
@@ -43,27 +41,24 @@ placementRef:
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-pure-node-prep
+    name: portworx-pure-node-prep-${site}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-operator
+    name: portworx-operator-${site}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-pure-secret
+    name: portworx-pure-secret-${site}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-flasharray-storagecluster
+    name: portworx-flasharray-storagecluster-${site}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-openshift-console-plugin
-  - apiGroup: policy.open-cluster-management.io
-    kind: Policy
-    name: portworx-hcp-storageclasses
+    name: portworx-openshift-console-plugin-${site}
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: portworx-hcp-storageclasses-binding
+  name: ${sc_binding}
   namespace: ${ns}
 placementRef:
   apiGroup: cluster.open-cluster-management.io
@@ -72,12 +67,11 @@ placementRef:
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-hcp-storageclasses
+    name: portworx-hcp-storageclasses-${site}
 EOF_YAML
+done
 
 echo
-oc --kubeconfig "$HUB_KUBECONFIG" -n "$ns" get placementbinding portworx-pure-binding portworx-hcp-storageclasses-binding -o yaml | \
-  egrep 'name:|subjects:|kind: Policy' || true
-
+oc --kubeconfig "$HUB_KUBECONFIG" -n "$ns" get placementbinding -o wide
 echo
-echo "Portworx policy bindings repaired. Give RHACM a minute to refresh the policy list."
+echo "Site-specific Portworx policy bindings repaired."

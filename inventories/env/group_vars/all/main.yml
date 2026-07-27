@@ -373,7 +373,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.81
-    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:5E:E0"
     ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -384,7 +384,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.82
-    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:40:C0"
     ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -395,7 +395,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.83
-    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F1:C0"
     ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -406,7 +406,7 @@ bm_nodes:
     role: worker
     enabled: false
     bmc_ip: 10.23.74.84
-    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:6C:10"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -417,7 +417,7 @@ bm_nodes:
     role: worker
     enabled: false
     bmc_ip: 10.23.74.85
-    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F6:80"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -428,7 +428,7 @@ bm_nodes:
     role: worker
     enabled: false
     bmc_ip: 10.23.74.86
-    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F7:00"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -482,7 +482,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.84
-    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:6C:10"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -493,7 +493,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.85
-    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F6:80"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -504,7 +504,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.86
-    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F7:00"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -806,34 +806,26 @@ site_b_hcp_ssh_key_file: "{{ build_root }}/site-b-hcp/ssh.pub"
 site_b_hcp_cli_path: "{{ build_root }}/bin/hcp"
 
 # ---------------------------------------------------------------------------
-# Portworx Enterprise with Everpure/Pure FlashArray on Site-A and Site-B
+# Portworx Enterprise with dedicated Pure FlashArray per hosting site
 # ---------------------------------------------------------------------------
-# These policies prepare the bare-metal OpenShift clusters for Portworx using
-# Pure FlashArray / Everpure backed cloud drives over Fibre Channel.
-# The policy is deliberately not part of the default HCP flow because the
-# MachineConfig rolls/reboots the nodes.
+# Site-A and Site-B are independent Portworx clusters. Each target cluster must
+# receive a px-pure-secret containing only the FlashArray assigned to that site.
+# Do not place both standalone arrays in one pure.json unless the arrays are an
+# intentionally configured FlashArray ActiveCluster pair.
 portworx_pure_policy_namespace: portworx-pure-policies
-portworx_pure_policy_placement_name: portworx-pure-placement
-portworx_pure_policy_binding_name: portworx-pure-binding
 portworx_pure_policy_remediation_action: enforce
 portworx_pure_policy_rendered_dir: "{{ build_root }}/portworx-pure-policies"
-portworx_pure_policy_cluster_label_key: portworx-pure
-portworx_pure_policy_cluster_label_value: "true"
-portworx_pure_managed_clusters:
-  - "{{ bm_cluster_name }}"
-  - "{{ site_b_cluster_name }}"
-portworx_pure_managed_clustersets:
-  - "{{ bm_clusterset }}"
-  - "{{ site_b_clusterset }}"
+portworx_pure_policy_cluster_label_key: portworx-pure-site
+portworx_pure_tolerate_unreachable: false
+# Optional site selector used by the token and policy playbooks. Empty means both.
+portworx_pure_site_filter: ""
 
-# Script/playbook switches. Node prep can be applied without an API token.
-# Full install requires vault_pure_flasharray_api_token.
+# Script/playbook switches. Node prep can be applied without array API tokens.
 portworx_pure_apply_node_prep: true
 portworx_pure_apply_operator: true
 portworx_pure_apply_storagecluster: true
-portworx_pure_tolerate_unreachable: false
 
-# Portworx Operator / StorageCluster settings.
+# Portworx Operator / StorageCluster settings shared by both sites.
 portworx_namespace: portworx
 portworx_operatorgroup_name: portworx-operator-group
 portworx_subscription_name: portworx-certified
@@ -842,17 +834,16 @@ portworx_operator_channel: stable
 portworx_operator_source: certified-operators
 portworx_operator_source_namespace: openshift-marketplace
 portworx_storagecluster_name: px-cluster-flasharray
-# StorageCluster generated from the Portworx 3.6.1.1 KDS template.
-# Keep the CR name stable so policy re-apply overwrites the same object on Site-A/Site-B.
+# Portworx Enterprise 3.6.1.1 requires Operator 26.2.0 or later.
+portworx_minimum_operator_version: "26.2.0"
 portworx_install_source: "https://install.portworx.com/3.6?operator=true&mc=false&kbver=1.31.0&ns=portworx&b=true&kvdbtls=true&certmgr=true&iop=6&s=%22size%3D2000%22&j=size%3D3&pureSanType=FC&ce=pure&dmthin=true&r=17001&c=px-cluster-eb3d29ae-abcb-4581-90bd-4164cc3cbe23&osft=true&stork=true&csi=true&mon=true&aut=false&tel=true&st=k8s"
 portworx_image: docker.io/portworx/oci-monitor:3.6.1.1
 portworx_start_port: 17001
 portworx_cloud_drive_size_gb: 2000
 portworx_journal_device_size_gb: 3
-# Optional full Portworx cloud-drive strings. Leave empty to auto-build size=<GB>.
-# Examples for advanced tuning can be set in vault/main vars if needed.
-# portworx_cloud_drive_spec: "size=2000"
-# portworx_journal_device_spec: "size=3"
+# Optional complete cloud-drive strings. Leave empty to build size=<GB>.
+portworx_cloud_drive_spec: ""
+portworx_journal_device_spec: ""
 portworx_default_io_profile: "6"
 portworx_misc_args: " -T px-storev2 "
 portworx_kvdb_enable_tls: true
@@ -862,51 +853,105 @@ portworx_enable_stork: true
 portworx_enable_csi: true
 portworx_enable_telemetry: true
 portworx_prometheus_export_metrics: true
-# Enable the Portworx Dynamic Plugin in the OpenShift Console on Site-A/Site-B.
-# This adds the Portworx navigation item and VM/PVC/storage tabs in the OpenShift UI.
 portworx_enable_openshift_console_plugin: true
 portworx_openshift_console_plugin_name: portworx
-
-# Everpure/Pure FlashArray details.
-# pure.json requires an API token, not the FlashArray login password.
-# Preferred flow:
-#   1) Store the FlashArray login password in Ansible Vault as vault_pure_flasharray_password.
-#   2) Run ./scripts/create-pure-api-token.sh to generate/rotate an API token.
-#   3) Run ./scripts/run-portworx-pure-install.sh.
-# You can still bypass auto-generation by setting vault_pure_flasharray_api_token directly in vault.yml.
-pure_flasharray_name: SV16-X90R4-B10-01
-pure_flasharray_mgmt_endpoint: "10.23.74.50"
-pure_flasharray_ct0_endpoint: "10.23.74.51"
-pure_flasharray_ct1_endpoint: "10.23.74.52"
-# Not listed in the workbook; retain the conventional .55 placeholder until verified.
-pure_flasharray_file_vip: "10.23.74.55"
-pure_flasharray_username: pureuser
-pure_flasharray_password: "{{ vault_pure_flasharray_password | default('') }}"
-pure_flasharray_api_token: "{{ vault_pure_flasharray_api_token | default('') }}"
-pure_flasharray_generated_token_file: "{{ build_root }}/pure/generated-flasharray-token.yml"
-pure_flasharray_token_recreate: true
-pure_flasharray_token_timeout: ""
-pure_flasharray_realm: ""
-pure_flasharray_pod: ""
-
-# Second storage appliance from the Pod 74 workbook. The current Portworx policy
-# templates consume only pure_flasharray_* above, so this is deliberately staged
-# and disabled until the multi-array policy work is tested in the next part.
-# The workbook's FC map also shows the six nodes split across both appliances;
-# do not enable this until per-site/per-node array placement is designed and tested.
-pure_flasharray_secondary_enabled: false
-pure_flasharray_secondary_name: SV16-X20R4-B08-13
-pure_flasharray_secondary_mgmt_endpoint: "10.23.74.60"
-pure_flasharray_secondary_ct0_endpoint: "10.23.74.61"
-pure_flasharray_secondary_ct1_endpoint: "10.23.74.62"
-pure_flasharray_secondary_username: pureuser
-pure_flasharray_secondary_password: "{{ vault_pure_flasharray_secondary_password | default('') }}"
-pure_flasharray_secondary_api_token: "{{ vault_pure_flasharray_secondary_api_token | default('') }}"
-
 portworx_pure_san_type: FC
 # Enable iscsid only when changing portworx_pure_san_type to iSCSI.
 portworx_pure_enable_iscsid: false
 
+# Portworx Enterprise 3.6.1.1 is pinned by this lab. At the time this inventory
+# was prepared, the published PE support matrix listed OpenShift through 4.21,
+# while PX-CSI 26.2 listed OpenShift 4.22. Keep this true only for the POC and
+# obtain an Everpure support statement before treating PE on OCP 4.22 as supported.
+portworx_poc_allow_ocp_4_22: true
+
+# Site-A FlashArray: only Site-A nodes should be FC-zoned and registered here.
+site_a_pure_flasharray_name: SV16-X90R4-B10-01
+site_a_pure_flasharray_mgmt_endpoint: "10.23.74.50"
+site_a_pure_flasharray_ct0_endpoint: "10.23.74.51"
+site_a_pure_flasharray_ct1_endpoint: "10.23.74.52"
+site_a_pure_flasharray_file_vip: "10.23.74.55"
+site_a_pure_flasharray_username: pureuser
+site_a_pure_flasharray_password: >-
+  {{
+    vault_site_a_pure_flasharray_password
+    | default(vault_pure_flasharray_password | default(''), true)
+  }}
+site_a_pure_flasharray_api_token: >-
+  {{
+    vault_site_a_pure_flasharray_api_token
+    | default(vault_pure_flasharray_api_token | default(''), true)
+  }}
+site_a_pure_flasharray_generated_token_file: "{{ build_root }}/pure/site-a-generated-flasharray-token.yml"
+site_a_pure_flasharray_token_recreate: true
+site_a_pure_flasharray_token_timeout: ""
+site_a_pure_flasharray_realm: ""
+site_a_pure_flasharray_pod: ""
+
+# Site-B FlashArray: only Site-B nodes should be FC-zoned and registered here.
+site_b_pure_flasharray_name: SV16-X20R4-B08-13
+site_b_pure_flasharray_mgmt_endpoint: "10.23.74.60"
+# Controller IPs/file VIP were not provided for Site-B. They are not required
+# in px-pure-secret for FC; populate them only when confirmed from the array.
+site_b_pure_flasharray_ct0_endpoint: ""
+site_b_pure_flasharray_ct1_endpoint: ""
+site_b_pure_flasharray_file_vip: ""
+site_b_pure_flasharray_username: pureuser
+site_b_pure_flasharray_password: >-
+  {{
+    vault_site_b_pure_flasharray_password
+    | default(vault_pure_flasharray_secondary_password | default(''), true)
+  }}
+site_b_pure_flasharray_api_token: >-
+  {{
+    vault_site_b_pure_flasharray_api_token
+    | default(vault_pure_flasharray_secondary_api_token | default(''), true)
+  }}
+site_b_pure_flasharray_generated_token_file: "{{ build_root }}/pure/site-b-generated-flasharray-token.yml"
+site_b_pure_flasharray_token_recreate: true
+site_b_pure_flasharray_token_timeout: ""
+site_b_pure_flasharray_realm: ""
+site_b_pure_flasharray_pod: ""
+
+# Declarative source of truth consumed by token generation, RHACM policy
+# rendering, validation, cleanup, and status checks.
+portworx_pure_sites:
+  - name: site-a
+    display_name: Site-A
+    managed_cluster: "{{ bm_cluster_name }}"
+    managed_clusterset: "{{ bm_clusterset }}"
+    kubeconfig_file: "{{ site_a_kubeconfig_file }}"
+    flasharray_name: "{{ site_a_pure_flasharray_name }}"
+    flasharray_mgmt_endpoint: "{{ site_a_pure_flasharray_mgmt_endpoint }}"
+    flasharray_ct0_endpoint: "{{ site_a_pure_flasharray_ct0_endpoint }}"
+    flasharray_ct1_endpoint: "{{ site_a_pure_flasharray_ct1_endpoint }}"
+    flasharray_file_vip: "{{ site_a_pure_flasharray_file_vip }}"
+    flasharray_username: "{{ site_a_pure_flasharray_username }}"
+    flasharray_password: "{{ site_a_pure_flasharray_password }}"
+    flasharray_api_token: "{{ site_a_pure_flasharray_api_token }}"
+    generated_token_file: "{{ site_a_pure_flasharray_generated_token_file }}"
+    token_recreate: "{{ site_a_pure_flasharray_token_recreate }}"
+    token_timeout: "{{ site_a_pure_flasharray_token_timeout }}"
+    realm: "{{ site_a_pure_flasharray_realm }}"
+    pod: "{{ site_a_pure_flasharray_pod }}"
+  - name: site-b
+    display_name: Site-B
+    managed_cluster: "{{ site_b_cluster_name }}"
+    managed_clusterset: "{{ site_b_clusterset }}"
+    kubeconfig_file: "{{ site_b_kubeconfig_file }}"
+    flasharray_name: "{{ site_b_pure_flasharray_name }}"
+    flasharray_mgmt_endpoint: "{{ site_b_pure_flasharray_mgmt_endpoint }}"
+    flasharray_ct0_endpoint: "{{ site_b_pure_flasharray_ct0_endpoint }}"
+    flasharray_ct1_endpoint: "{{ site_b_pure_flasharray_ct1_endpoint }}"
+    flasharray_file_vip: "{{ site_b_pure_flasharray_file_vip }}"
+    flasharray_username: "{{ site_b_pure_flasharray_username }}"
+    flasharray_password: "{{ site_b_pure_flasharray_password }}"
+    flasharray_api_token: "{{ site_b_pure_flasharray_api_token }}"
+    generated_token_file: "{{ site_b_pure_flasharray_generated_token_file }}"
+    token_recreate: "{{ site_b_pure_flasharray_token_recreate }}"
+    token_timeout: "{{ site_b_pure_flasharray_token_timeout }}"
+    realm: "{{ site_b_pure_flasharray_realm }}"
+    pod: "{{ site_b_pure_flasharray_pod }}"
 
 # ---------------------------------------------------------------------------
 # HCP tenant authentication policy

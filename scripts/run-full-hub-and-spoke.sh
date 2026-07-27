@@ -100,7 +100,7 @@ run_playbook playbooks/12_fix_site_a_policy_placement.yml
 
 # Site-B
 run_playbook playbooks/10_configure_site_b_ad_dns.yml
-# Auto-fill Site-B b09 boot_mac placeholders from iDRAC before preflight.
+# Auto-fill Site-B boot_mac placeholders from iDRAC before preflight.
 run_playbook playbooks/05_discover_site_b_idrac_nics.yml
 run_playbook playbooks/05_idrac_preflight_site_b.yml
 run_playbook playbooks/08_apply_site_b_baremetal_cluster.yml

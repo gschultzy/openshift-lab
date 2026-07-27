@@ -1,5 +1,5 @@
 ---
-- name: Ensure Portworx OpenShift console plugin is enabled on Site-A and Site-B
+- name: Ensure Portworx OpenShift console plugin is enabled on selected sites
   hosts: localhost
   gather_facts: false
   tasks:
@@ -13,64 +13,65 @@
         msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
       when: not hub_kubeconfig_stat.stat.exists
 
-    - name: Validate this kubeconfig is the hub, not a spoke
+    - name: Validate this kubeconfig is the hub
       ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
       changed_when: false
       register: portworx_console_hub_api_server
 
-    - name: Stop if running against Site-A or Site-B
+    - name: Stop if running against a spoke
       ansible.builtin.fail:
         msg: |
           Refusing to enable the console plugin because this kubeconfig is not {{ cluster_name }}.
-
           Current API server: {{ portworx_console_hub_api_server.stdout }}
           Expected: api.{{ cluster_name }}.{{ base_domain }}
       when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in portworx_console_hub_api_server.stdout"
 
-    - name: Ensure spoke kubeconfig output directories exist
+    - name: Select requested Portworx/Pure sites
+      ansible.builtin.set_fact:
+        portworx_pure_selected_sites: >-
+          {{
+            portworx_pure_sites
+            if (portworx_pure_site_filter | default('') | length == 0)
+            else (portworx_pure_sites | selectattr('name', 'equalto', portworx_pure_site_filter) | list)
+          }}
+
+    - name: Validate selected sites
+      ansible.builtin.assert:
+        that:
+          - portworx_pure_selected_sites | length > 0
+        fail_msg: "No Portworx site matched '{{ portworx_pure_site_filter }}'."
+
+    - name: Ensure selected spoke kubeconfig directories exist
       ansible.builtin.file:
-        path: "{{ item | dirname }}"
+        path: "{{ item.kubeconfig_file | dirname }}"
         state: directory
         mode: "0755"
-      loop:
-        - "{{ site_a_kubeconfig_file }}"
-        - "{{ site_b_kubeconfig_file }}"
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
 
-    - name: Extract Site-A admin kubeconfig from RHACM hub
+    - name: Extract selected spoke admin kubeconfigs from RHACM hub
       ansible.builtin.shell: |
         set -euo pipefail
-        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
-        chmod 0600 {{ site_a_kubeconfig_file }}
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ item.managed_cluster }} \
+          get secret {{ item.managed_cluster }}-admin-kubeconfig \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ item.kubeconfig_file | quote }}
+        chmod 0600 {{ item.kubeconfig_file | quote }}
       args:
         executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
       changed_when: true
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
 
-    - name: Extract Site-B admin kubeconfig from RHACM hub
+    - name: Append Portworx plugin without removing existing plugins
       ansible.builtin.shell: |
         set -euo pipefail
-        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
-        chmod 0600 {{ site_b_kubeconfig_file }}
-      args:
-        executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
-      changed_when: true
-
-    - name: Append Portworx plugin to Site-A and Site-B console plugin lists without removing existing plugins
-      ansible.builtin.shell: |
-        set -euo pipefail
-        K={{ item.kubeconfig | quote }}
+        K={{ item.kubeconfig_file | quote }}
         PLUGIN={{ portworx_openshift_console_plugin_name | default('portworx') | quote }}
-        SITE={{ item.name | quote }}
-
-        echo "# ${SITE}: current console plugins"
-        CURRENT=$(oc --kubeconfig "$K" get console.operator cluster -o jsonpath='{.spec.plugins}' 2>/dev/null || true)
-        echo "${CURRENT:-[]}" 
 
         if oc --kubeconfig "$K" get console.operator cluster -o json | jq -e --arg plugin "$PLUGIN" '(.spec.plugins // []) | index($plugin)' >/dev/null; then
-          echo "${SITE}: ${PLUGIN} already present"
+          echo '{{ item.display_name }}: plugin already present'
         else
           LEN=$(oc --kubeconfig "$K" get console.operator cluster -o json | jq '(.spec.plugins // []) | length')
           if [ "$LEN" -eq 0 ]; then
@@ -79,26 +80,19 @@
             oc --kubeconfig "$K" patch console.operator cluster --type=json -p "[{\"op\":\"add\",\"path\":\"/spec/plugins/-\",\"value\":\"${PLUGIN}\"}]"
           fi
         fi
-
-        echo
-        echo "# ${SITE}: final console plugins"
         oc --kubeconfig "$K" get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
-        echo
-        echo "# ${SITE}: ConsolePlugin"
         oc --kubeconfig "$K" get consoleplugin "$PLUGIN" -o wide 2>/dev/null || true
-        echo
-        echo "# ${SITE}: Portworx plugin pods"
-        oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods 2>/dev/null | egrep -i 'NAME|px-plugin|plugin|proxy|cache' || true
       args:
         executable: /bin/bash
-      loop:
-        - name: Site-A
-          kubeconfig: "{{ site_a_kubeconfig_file }}"
-        - name: Site-B
-          kubeconfig: "{{ site_b_kubeconfig_file }}"
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
       register: portworx_console_enable_status
       changed_when: "'patched' in portworx_console_enable_status.stdout"
 
-    - name: Print Portworx console plugin status
+    - name: Print selected-site console plugin status
       ansible.builtin.debug:
-        var: portworx_console_enable_status.results | map(attribute='stdout_lines') | list
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ portworx_console_enable_status.results }}"
+      loop_control:
+        label: "{{ item.item.display_name }}"

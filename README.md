@@ -59,7 +59,8 @@ Site-A API:     api.{{ bm_cluster_name }}.{{ bm_base_domain }}
 Site-B API:     api.{{ site_b_cluster_name }}.{{ site_b_base_domain }}
 Site-A nodes:   enabled entries in bm_nodes
 Site-B nodes:   enabled entries in site_b_nodes
-Pure array:     {{ pure_flasharray_mgmt_endpoint }}
+Site-A array:   {{ site_a_pure_flasharray_name }} / {{ site_a_pure_flasharray_mgmt_endpoint }}
+Site-B array:   {{ site_b_pure_flasharray_name }} / {{ site_b_pure_flasharray_mgmt_endpoint }}
 ```
 
 The scripts ask for the Ansible Vault password once and reuse it. You can also provide a vault password file:

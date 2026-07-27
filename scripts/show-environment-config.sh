@@ -31,8 +31,10 @@ show 'Site-B cluster' site_b_cluster_name
 show 'Site-B API VIP' site_b_api_vip
 show 'Site-B ingress VIP' site_b_ingress_vip
 show 'Site-B HCP LB range' site_b_hcp_metallb_range
-show 'Primary FlashArray' pure_flasharray_mgmt_endpoint
-show 'Secondary FlashArray' pure_flasharray_secondary_mgmt_endpoint
+show 'Site-A FlashArray name' site_a_pure_flasharray_name
+show 'Site-A FlashArray endpoint' site_a_pure_flasharray_mgmt_endpoint
+show 'Site-B FlashArray name' site_b_pure_flasharray_name
+show 'Site-B FlashArray endpoint' site_b_pure_flasharray_mgmt_endpoint
 
 printf '\nBare-metal nodes:\n'
 python3 - "$ENV_MAIN_FILE" <<'PY'

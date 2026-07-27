@@ -1,0 +1,128 @@
+---
+- name: "Reset generated token variables for {{ portworx_site.display_name }}"
+  ansible.builtin.set_fact:
+    portworx_site_generated_token_vars: {}
+  no_log: true
+
+- name: "Check for generated FlashArray API token for {{ portworx_site.display_name }}"
+  ansible.builtin.stat:
+    path: "{{ portworx_site.generated_token_file }}"
+  register: portworx_site_generated_token_stat
+  no_log: true
+
+- name: "Load generated FlashArray API token for {{ portworx_site.display_name }}"
+  ansible.builtin.include_vars:
+    file: "{{ portworx_site.generated_token_file }}"
+    name: portworx_site_generated_token_vars
+  when: portworx_site_generated_token_stat.stat.exists
+  no_log: true
+
+- name: "Select effective FlashArray API token for {{ portworx_site.display_name }}"
+  ansible.builtin.set_fact:
+    portworx_site_effective_api_token: >-
+      {{
+        portworx_site.flasharray_api_token
+        if (portworx_site.flasharray_api_token | default('') | length > 0)
+        else (portworx_site_generated_token_vars.pure_flasharray_api_token | default(''))
+      }}
+  no_log: true
+
+- name: "Stop if {{ portworx_site.display_name }} full install has no FlashArray API token"
+  ansible.builtin.fail:
+    msg: |
+      Portworx StorageCluster deployment is enabled for {{ portworx_site.display_name }},
+      but no API token is available for {{ portworx_site.flasharray_name }}
+      ({{ portworx_site.flasharray_mgmt_endpoint }}).
+
+      Add the site-specific password/token to Ansible Vault or generate both tokens:
+        ansible-vault edit inventories/env/group_vars/all/vault.yml
+        ./scripts/create-pure-api-token.sh
+
+      Expected Vault variables:
+        vault_{{ portworx_site.name | replace('-', '_') }}_pure_flasharray_password
+        vault_{{ portworx_site.name | replace('-', '_') }}_pure_flasharray_api_token
+  when:
+    - portworx_pure_apply_storagecluster | default(true) | bool
+    - portworx_site_effective_api_token | default('') | length == 0
+
+- name: "Confirm {{ portworx_site.display_name }} ManagedCluster exists"
+  ansible.builtin.command: >-
+    oc --kubeconfig {{ hub_kubeconfig | quote }}
+    get managedcluster {{ portworx_site.managed_cluster }}
+  changed_when: false
+
+- name: "Label {{ portworx_site.display_name }} for its dedicated Portworx policy placement"
+  ansible.builtin.command: >-
+    oc --kubeconfig {{ hub_kubeconfig | quote }}
+    label managedcluster {{ portworx_site.managed_cluster }}
+    {{ portworx_pure_policy_cluster_label_key }}={{ portworx_site.name }}
+    --overwrite
+  changed_when: true
+
+- name: "Set policy rendering variables for {{ portworx_site.display_name }}"
+  ansible.builtin.set_fact:
+    portworx_pure_site_name: "{{ portworx_site.name }}"
+    portworx_pure_policy_suffix: "-{{ portworx_site.name }}"
+    portworx_pure_policy_cluster_label_value: "{{ portworx_site.name }}"
+    portworx_pure_policy_placement_name: "portworx-pure-{{ portworx_site.name }}-placement"
+    portworx_pure_policy_binding_name: "portworx-pure-{{ portworx_site.name }}-binding"
+    portworx_pure_managed_clustersets:
+      - "{{ portworx_site.managed_clusterset }}"
+    portworx_pure_site_rendered_dir: "{{ portworx_pure_policy_rendered_dir }}/{{ portworx_site.name }}"
+    pure_flasharray_name: "{{ portworx_site.flasharray_name }}"
+    pure_flasharray_mgmt_endpoint: "{{ portworx_site.flasharray_mgmt_endpoint }}"
+    pure_flasharray_api_token: "{{ portworx_site_effective_api_token }}"
+    pure_flasharray_realm: "{{ portworx_site.realm | default('') }}"
+    pure_flasharray_pod: "{{ portworx_site.pod | default('') }}"
+  no_log: true
+
+- name: "Create rendered policy directory for {{ portworx_site.display_name }}"
+  ansible.builtin.file:
+    path: "{{ portworx_pure_site_rendered_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: "Clean old rendered policies for {{ portworx_site.display_name }}"
+  ansible.builtin.file:
+    path: "{{ portworx_pure_site_rendered_dir }}"
+    state: absent
+
+- name: "Recreate rendered policy directory for {{ portworx_site.display_name }}"
+  ansible.builtin.file:
+    path: "{{ portworx_pure_site_rendered_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: "Render dedicated Portworx/Pure policies for {{ portworx_site.display_name }}"
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../{{ item }}"
+    dest: "{{ portworx_pure_site_rendered_dir }}/{{ item | basename | regex_replace('\\.j2$', '') }}"
+    mode: "0600"
+  loop: "{{ portworx_pure_policy_templates }}"
+  no_log: "{{ 'secret' in (item | basename) }}"
+
+- name: "Validate dedicated Portworx/Pure policies for {{ portworx_site.display_name }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for f in {{ portworx_pure_site_rendered_dir }}/*.yaml; do
+      if [ -s "$f" ] && grep -Eq '^(apiVersion|kind):' "$f"; then
+        echo "Validating $f"
+        oc --kubeconfig {{ hub_kubeconfig | quote }} apply --dry-run=client -f "$f" >/dev/null
+      fi
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: "Apply dedicated Portworx/Pure policies for {{ portworx_site.display_name }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for f in {{ portworx_pure_site_rendered_dir }}/*.yaml; do
+      if [ -s "$f" ] && grep -Eq '^(apiVersion|kind):' "$f"; then
+        echo "Applying $f"
+        oc --kubeconfig {{ hub_kubeconfig | quote }} apply -f "$f"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  changed_when: true

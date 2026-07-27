@@ -8,6 +8,8 @@
 #   cp inventories/env/group_vars/all/vault.yml.example inventories/env/group_vars/all/vault.yml
 #   ansible-vault encrypt inventories/env/group_vars/all/vault.yml
 
-# Staged for the second FlashArray; not consumed until multi-array policy support is enabled.
-vault_pure_flasharray_secondary_password: "CHANGE_ME_SECONDARY_FLASHARRAY_PASSWORD"
-vault_pure_flasharray_secondary_api_token: "CHANGE_ME_SECONDARY_FLASHARRAY_API_TOKEN"
+# Dedicated array credentials belong in inventories/env/group_vars/all/vault.yml:
+# vault_site_a_pure_flasharray_password
+# vault_site_a_pure_flasharray_api_token
+# vault_site_b_pure_flasharray_password
+# vault_site_b_pure_flasharray_api_token

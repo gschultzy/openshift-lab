@@ -1,293 +1,425 @@
-# OpenShift hub, Site-A, Site-B and HCP lab
+# OpenShift Hub, Spokes and Hosted Control Planes Lab
 
-This repo builds this lab:
+This repository builds a complete OpenShift lab with:
+
+- An Ubuntu 24.04 Ansible bastion.
+- A vSphere Single Node OpenShift management hub.
+- Red Hat Advanced Cluster Management and Multicluster Engine on the hub.
+- A three-node bare-metal OpenShift cluster at Site-A.
+- A three-node bare-metal OpenShift cluster at Site-B.
+- A dedicated Pure FlashArray and Portworx deployment for each site.
+- Hosted Control Plane tenant clusters running on Site-A and Site-B.
+- All spoke and HCP tenant clusters imported into RHACM on the hub.
+
+Run all commands from the repository root.
+
+## Architecture
 
 ```text
-{{ cluster_name }} = vSphere SNO hub with RHACM/MCE/Assisted Installer
-{{ bm_cluster_name }} = bare-metal hosting cluster using enabled entries in bm_nodes
-{{ site_b_cluster_name }} = bare-metal hosting cluster using enabled entries in site_b_nodes
-HCPs = hosted control planes defined by hcp_tenants
+                              Ubuntu 24.04 Bastion
+                      Ansible + OpenShift command-line tools
+                                        |
+                                        v
+                              vSphere SNO Hub
+                    RHACM + MCE + Assisted Installer
+                         Central fleet management
+                           /                    \
+                          /                      \
+                         v                        v
+              Site-A OpenShift              Site-B OpenShift
+              b10-30 / 31 / 33              b10-34 / 35 / 36
+              HCP hosting cluster            HCP hosting cluster
+                       |                              |
+                       v                              v
+             SV16-X90R4-B10-01              SV16-X20R4-B08-13
+                  10.23.74.50                     10.23.74.60
+             Dedicated Portworx              Dedicated Portworx
+                       |                              |
+                  +----+----+                    +----+----+
+                  |         |                    |         |
+                  v         v                    v         v
+             HCP tenant  HCP tenant         HCP tenant  HCP tenant
+               t1-px      t2-kv               t1-px      t2-kv
 ```
 
-Site-A and Site-B are **managed spoke / hosting clusters**. Do not install a second local RHACM/MCE hub on Site-A or Site-B. The hub manages them and enables the HyperShift add-on.
+The **SNO hub** is the central management cluster. It runs RHACM, MCE, and Assisted Installer and manages the two physical spoke clusters and the HCP tenant clusters.
 
-Detailed fixes and troubleshooting have been moved to [`docs/troubleshooting.md`](docs/troubleshooting.md).
+**Site-A** and **Site-B** are independent OpenShift clusters. They act as HCP hosting clusters: the Hosted Control Plane components and KubeVirt worker virtual machines run on these clusters.
 
+Each site uses only its assigned Pure FlashArray:
 
-All environment-specific values are stored in:
+| Site | OpenShift nodes | Pure FlashArray | Management IP |
+|---|---|---|---|
+| Site-A | `b10-30`, `b10-31`, `b10-33` | `SV16-X90R4-B10-01` | `10.23.74.50` |
+| Site-B | `b10-34`, `b10-35`, `b10-36` | `SV16-X20R4-B08-13` | `10.23.74.60` |
+
+Portworx provides the storage classes used by the HCP control-plane data, worker VM root disks, and optional tenant data disks. The HCP tenant clusters are then imported into RHACM so the complete environment can be viewed and managed from the hub.
+
+## Deployment Order
+
+Use this order:
+
+1. Configure `main.yml` and `vault.yml`.
+2. Build the Ubuntu bastion.
+3. Deploy the SNO hub and both spoke clusters.
+4. Deploy the dedicated Portworx/Pure storage at each site.
+5. Create and import the HCP tenant clusters.
+6. Verify the complete environment from the RHACM hub.
+
+## Configuration
+
+### Main configuration: `main.yml`
+
+All non-secret environment configuration is stored in:
 
 ```text
 inventories/env/group_vars/all/main.yml
 ```
 
-Shell helpers load that file through `scripts/lib/inventory-env.sh`; the HCP tenant list is loaded from `hcp_tenants` rather than duplicated in shell scripts. To print the current values:
+Edit it before deployment:
+
+```bash
+nano inventories/env/group_vars/all/main.yml
+```
+
+It contains:
+
+- OpenShift release and cluster names.
+- SNO, Site-A, and Site-B networking.
+- Gateways, DNS servers, VIPs, VLANs, and MetalLB ranges.
+- vCenter, ESXi, datastore, and port-group settings.
+- SNO virtual machine sizing and storage.
+- Bare-metal node, iDRAC, and boot-MAC information.
+- Dedicated Site-A and Site-B Pure FlashArray settings.
+- Portworx storage-class configuration.
+- HCP tenant names, cluster and service CIDRs, worker sizing, and storage settings.
+
+Display the active environment configuration with:
 
 ```bash
 ./scripts/show-environment-config.sh
 ```
 
----
+Do not store passwords, pull secrets, private keys, or array API tokens in `main.yml`.
 
-## 1. Prep the bastion
+### Secret configuration: `vault.yml`
 
-Start on the Ubuntu 24.04 bastion
-Create the Python environment and install requirements:
+All secrets are stored in the encrypted Ansible Vault file:
+
+```text
+inventories/env/group_vars/all/vault.yml
+```
+
+This includes:
+
+- vCenter and ESXi credentials.
+- Windows DNS credentials.
+- iDRAC credentials.
+- Red Hat pull secret.
+- SSH private material where required.
+- Site-A Pure FlashArray credentials and API token.
+- Site-B Pure FlashArray credentials and API token.
+- HCP tenant authentication secrets.
+
+## Create and Manage Ansible Vault
+
+### Create the Vault for the first time
 
 ```bash
+cp inventories/env/group_vars/all/vault.yml.example \
+  inventories/env/group_vars/all/vault.yml
+
+nano inventories/env/group_vars/all/vault.yml
+ansible-vault encrypt inventories/env/group_vars/all/vault.yml
+```
+
+Replace every required `CHANGE_ME` value before encrypting the file.
+
+### Edit the encrypted Vault
+
+```bash
+ansible-vault edit inventories/env/group_vars/all/vault.yml
+```
+
+### View the encrypted Vault
+
+```bash
+ansible-vault view inventories/env/group_vars/all/vault.yml
+```
+
+### Temporarily decrypt the Vault
+
+```bash
+ansible-vault decrypt inventories/env/group_vars/all/vault.yml
+```
+
+The file is plaintext after this command. Re-encrypt it immediately after editing:
+
+```bash
+ansible-vault encrypt inventories/env/group_vars/all/vault.yml
+```
+
+### Change the Vault password
+
+```bash
+ansible-vault rekey inventories/env/group_vars/all/vault.yml
+```
+
+### Use a Vault password file
+
+```bash
+install -m 600 /dev/null ~/.ansible-vault-pass
+nano ~/.ansible-vault-pass
+export ANSIBLE_VAULT_PASSWORD_FILE="$HOME/.ansible-vault-pass"
+```
+
+Place only the Vault password on the first line.
+
+Never commit any of the following:
+
+- A decrypted `vault.yml`.
+- A Vault password file.
+- Generated kubeconfigs.
+- The generated `build/` directory.
+
+The repository `.gitignore` excludes these files by default.
+
+## Build the Bastion
+
+Create an Ubuntu 24.04 VM that can reach:
+
+- vCenter and ESXi.
+- Windows DNS.
+- All iDRAC interfaces.
+- The SNO and bare-metal OpenShift networks.
+- Both Pure FlashArray management interfaces.
+- Required Red Hat and internet repositories.
+
+Bootstrap the bastion:
+
+```bash
+chmod +x scripts/*.sh scripts/lib/*.sh
 ./scripts/bootstrap-ubuntu-24.04.sh
 source .venv/bin/activate
 ```
 
-For later shells:
+Activate the environment in every new terminal:
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
 ```
 
-Check the main lab config:
+Confirm the tools:
 
 ```bash
-vi inventories/env/group_vars/all/main.yml
+oc version --client
+openshift-install version
+ansible --version
 ```
 
-Important defaults in this lab:
+## Deploy the Hub and Spokes
 
-```text
-Hub API:        {{ hub_api_hostname }}
-Site-A API:     api.{{ bm_cluster_name }}.{{ bm_base_domain }}
-Site-B API:     api.{{ site_b_cluster_name }}.{{ site_b_base_domain }}
-Site-A nodes:   enabled entries in bm_nodes
-Site-B nodes:   enabled entries in site_b_nodes
-Site-A array:   {{ site_a_pure_flasharray_name }} / {{ site_a_pure_flasharray_mgmt_endpoint }}
-Site-B array:   {{ site_b_pure_flasharray_name }} / {{ site_b_pure_flasharray_mgmt_endpoint }}
-```
-
-The scripts ask for the Ansible Vault password once and reuse it. You can also provide a vault password file:
-
-```bash
-export ANSIBLE_VAULT_PASSWORD_FILE=/path/to/vault-password-file
-```
-
-When bastion DNS resolver automation is enabled, the runner requests the Ubuntu user's local sudo password separately from the Ansible Vault password. It validates the sudo credential before starting the DNS playbook and allows up to three attempts, preventing Ansible's confusing duplicate become-password prompt. The password is stored only in a mode `0600` temporary file for the life of the script and deleted on exit. Passwordless sudo is detected automatically. For unattended execution, provide an Ansible become password file; the runner validates that file before using it:
-
-```bash
-export ANSIBLE_BECOME_PASSWORD_FILE=/path/to/local-sudo-password-file
-```
-
----
-
-## 2. Create and destroy the hub
-
-Create the SNO hub VM and wait for OpenShift to install:
-
-```bash
-./scripts/run.sh
-```
-
-Before rendering or booting the Agent ISO, `run.sh` now performs mandatory DNS preparation:
-
-1. Creates or updates the SNO `api`, `api-int`, apps wildcard, and node records on the configured AD DNS server.
-2. Installs a persistent `systemd-resolved` route on the Ubuntu bastion for `base_domain`.
-3. Verifies every record directly against `ad_dns_server`.
-4. Verifies the same records through the normal Ubuntu system resolver used by `openshift-install`.
-
-All DNS servers, domains, record targets, retry values, and resolver settings are stored in `inventories/env/group_vars/all/main.yml`. The install stops before VM creation when DNS is unavailable or returns the wrong address. If an Agent install state already exists, `run.sh` resumes it instead of deleting the build directory and regenerating the ISO. Use `FORCE_REBUILD_HUB=true` only for a deliberate clean rebuild.
-
-Verify the hub:
-
-```bash
-export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
-export KUBECONFIG=$HUB_KUBECONFIG
-
-oc get nodes
-oc get clusterversion
-oc get co
-```
-
-Destroy the hub VM and remove the local hub build directory:
-
-```bash
-CONFIRM_DELETE_HUB=true ./scripts/hub-delete.sh
-```
-
-Recreate the hub after deleting it:
-
-```bash
-./scripts/run.sh
-```
-
-Force a hub rebuild while keeping the same repo directory:
-
-```bash
-FORCE_REBUILD_HUB=true ./scripts/run.sh
-```
-
----
-
-## 3. Create and destroy Site-A and Site-B
-
-Create Site-A:
-
-```bash
-./scripts/run-site-a-day2.sh
-```
-
-Create Site-B:
-
-```bash
-./scripts/run-site-b-day2.sh
-```
-
-These site scripts do the hub day-2 work that is needed before bare-metal cluster creation. That includes hub LVM storage, RHACM, Assisted Installer, provisioning services, DNS, iDRAC checks, bare-metal install objects, and the HCP hosting policies for each site.
-
-Verify from the hub:
-
-```bash
-export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
-export KUBECONFIG=$HUB_KUBECONFIG
-
-oc get managedcluster
-oc -n site-a get clusterdeployment,agentclusterinstall,infraenv,bmh,agent -o wide
-oc -n site-b get clusterdeployment,agentclusterinstall,infraenv,bmh,agent -o wide
-```
-
-Destroy Site-A and Site-B from the hub. Delete HCPs first if they exist:
-
-```bash
-./scripts/hcp-delete.sh
-
-CONFIRM_DELETE_SITE_A=true ./scripts/site-a-delete.sh
-CONFIRM_DELETE_SITE_B=true ./scripts/site-b-delete.sh
-```
-
-The site delete scripts remove RHACM/Assisted Installer objects, the ManagedCluster, policy namespace, ClusterSet, and cluster namespace from the hub. They do **not** wipe bare-metal disks and do **not** clean Pure FlashArray volumes.
-
----
-
-## 4. Enable Portworx on Site-A and Site-B
-
-Use this after Site-A and Site-B are installed and visible as managed clusters on the hub.
-
-For a clean lab rebuild, first clean old Portworx-created Pure volumes from the FlashArray:
-
-```bash
-./scripts/cleanup-pure-portworx-volumes.sh
-```
-
-The cleanup script targets only:
-
-```text
-pxclouddrive-*
-px_*pvc-*
-```
-
-It opens one persistent SSH connection to the Pure array, so the Pure password is entered once. It disconnects matching volumes from every Pure host/host group, then destroys and eradicates them where Pure allows it.
-
-Install/apply the Portworx Pure policies:
-
-```bash
-./scripts/bootstrap-pure-token-and-portworx.sh
-```
-
-That flow creates or refreshes the Pure API token, runs node prep, installs the operator, applies the `px-cluster-flasharray` StorageCluster, enables the console plugin, and applies the HCP StorageClasses.
-
-Check Portworx:
-
-```bash
-./scripts/check-portworx-pure.sh
-```
-
-Or manually:
-
-```bash
-for site in site-a site-b; do
-  K="build/{{ cluster_name }}/${site}/auth/kubeconfig"
-  echo
-  echo "### $site"
-  oc --kubeconfig "$K" -n portworx get storagecluster
-  oc --kubeconfig "$K" -n portworx get pods | egrep 'px-cluster|portworx-api|kvdb|csi|stork|cert-manager' || true
-done
-```
-
-Expected result:
-
-```text
-px-cluster-flasharray   Running
-px-cluster-flasharray-* 1/1 Running
-portworx-api-*          2/2 Running
-px-csi-ext              Running
-stork                   Running
-```
-
----
-
-## 5. Create and destroy HCP tenants
-
-Create all four hosted clusters and import them into RHACM:
-
-```bash
-./scripts/hcp-create.sh
-```
-
-This creates two tenants on each hosting site:
-
-| Site | HostedCluster | RHACM ManagedCluster | Shape | Pod CIDR | Service CIDR |
-|---|---|---|---|---|---|
-| Site-A | `site-a-hcp-t1-px` | `site-a-hcp-t1-px` | PX tenant, extra FADA disks | `{{ hcp_tenants[0].cluster_cidr }}` | `{{ hcp_tenants[0].service_cidr }}` |
-| Site-A | `site-a-hcp-t2-kv` | `site-a-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `{{ hcp_tenants[1].cluster_cidr }}` | `{{ hcp_tenants[1].service_cidr }}` |
-| Site-B | `site-b-hcp-t1-px` | `site-b-hcp-t1-px` | PX tenant, extra FADA disks | `{{ hcp_tenants[2].cluster_cidr }}` | `{{ hcp_tenants[2].service_cidr }}` |
-| Site-B | `site-b-hcp-t2-kv` | `site-b-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `{{ hcp_tenants[3].cluster_cidr }}` | `{{ hcp_tenants[3].service_cidr }}` |
-
-The tenant list is defined in `scripts/lib/hcp-tenants.sh`. RHACM import names intentionally match the HostedCluster names.
-
-Check the HCPs:
-
-```bash
-oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig get managedcluster
-```
-
-Exported guest kubeconfigs are written here:
-
-```text
-build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
-build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t2-kv.kubeconfig
-build/{{ cluster_name }}/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
-build/{{ cluster_name }}/hcp-kubeconfigs/site-b-hcp-t2-kv.kubeconfig
-```
-
-Destroy all HCP tenants:
-
-```bash
-./scripts/hcp-delete.sh
-```
-
-For a lab-only stuck namespace cleanup:
-
-```bash
-HCP_FORCE_CLEANUP=true ./scripts/hcp-delete.sh
-```
-
----
-
-## 6. Useful one-command flows
-
-Build hub, Site-A and Site-B in one run:
+Run the complete physical-cluster deployment:
 
 ```bash
 ./scripts/run-full-hub-and-spoke.sh
 ```
 
-Reapply only the Portworx StorageCluster policy after editing the template:
+This automation:
+
+1. Validates the bastion, OpenShift tools, inventory, vSphere, and networks.
+2. Creates and validates the SNO DNS records.
+3. Builds or resumes the vSphere SNO hub.
+4. Installs hub storage, RHACM, MCE, and Assisted Installer.
+5. Discovers and validates the Site-A iDRAC NIC and boot MAC details.
+6. Deploys Site-A and imports it into RHACM.
+7. Applies the Site-A HCP hosting prerequisites and RHACM policies.
+8. Discovers and validates the Site-B iDRAC NIC and boot MAC details.
+9. Deploys Site-B and imports it into RHACM.
+10. Applies the Site-B HCP hosting prerequisites and RHACM policies.
+
+The workflow is resumable. Completed hub and spoke work is skipped where possible.
+
+## Deploy Dedicated Storage
+
+After both spokes are available, deploy Portworx against each site's assigned Pure FlashArray.
+
+### Site-A
 
 ```bash
-./scripts/replace-portworx-storageclusters.sh
+SITE=site-a ./scripts/bootstrap-pure-token-and-portworx.sh
+SITE=site-a ./scripts/check-portworx-pure.sh
 ```
 
-Repair Portworx policy bindings if RHACM shows selected clusters as empty:
+### Site-B
 
 ```bash
-./scripts/repair-portworx-policy-bindings.sh
+SITE=site-b ./scripts/bootstrap-pure-token-and-portworx.sh
+SITE=site-b ./scripts/check-portworx-pure.sh
+```
+
+Each spoke receives only its own array endpoint, API token, secret, Portworx policy, and storage configuration.
+
+Before proceeding to HCP, confirm the required HCP storage classes exist on both sites:
+
+```bash
+./scripts/check-hcp-portworx-storage.sh
+```
+
+## Deploy Hosted Control Plane Tenants
+
+HCP tenants are defined in:
+
+```text
+inventories/env/group_vars/all/main.yml
+```
+
+The default layout contains two HCP tenants per site:
+
+| Hosting site | HCP tenant | Purpose |
+|---|---|---|
+| Site-A | `site-a-hcp-t1-px` | HCP tenant with additional Portworx-backed data disks |
+| Site-A | `site-a-hcp-t2-kv` | HCP tenant using KubeVirt worker root storage |
+| Site-B | `site-b-hcp-t1-px` | HCP tenant with additional Portworx-backed data disks |
+| Site-B | `site-b-hcp-t2-kv` | HCP tenant using KubeVirt worker root storage |
+
+Create all configured HCP tenants and import them into RHACM:
+
+```bash
+./scripts/hcp-create.sh
+```
+
+The HCP workflow:
+
+1. Confirms Site-A and Site-B are ready to host HCP.
+2. Applies the required HyperShift, KubeVirt, networking, pull-secret, and storage prerequisites.
+3. Creates each `HostedCluster` and `NodePool` on its assigned hosting site.
+4. Uses the site-local Portworx storage classes for HCP etcd, worker root disks, and tenant data disks.
+5. Waits for the tenant admin kubeconfig secrets.
+6. Exports the HCP tenant kubeconfigs.
+7. Imports all HCP tenant clusters into RHACM on the SNO hub.
+
+Exported HCP kubeconfigs are stored under:
+
+```text
+build/lab-sno/hcp-kubeconfigs/
+```
+
+Apply the optional HTPasswd tenant authentication policy:
+
+```bash
+./scripts/apply-hcp-tenant-htpasswd-policy.sh
+```
+
+Delete all HCP tenants when required:
+
+```bash
+./scripts/hcp-delete.sh
+```
+
+## Verify the Complete Environment
+
+Load the hub kubeconfig:
+
+```bash
+HUB_NAME=$(./scripts/lib/inventory-value.py \
+  --file inventories/env/group_vars/all/main.yml cluster_name)
+
+export KUBECONFIG="$PWD/build/$HUB_NAME/install/auth/kubeconfig"
+
+BUILD_ROOT="$PWD/build/$HUB_NAME"
+SITE_A_KUBECONFIG="$BUILD_ROOT/site-a/auth/kubeconfig"
+SITE_B_KUBECONFIG="$BUILD_ROOT/site-b/auth/kubeconfig"
+HCP_KUBECONFIG_DIR="$BUILD_ROOT/hcp-kubeconfigs"
+```
+
+### Verify the hub and managed clusters
+
+```bash
+oc get nodes
+oc get clusterversion
+oc get managedcluster
+```
+
+Expected RHACM managed clusters include:
+
+- `site-a`
+- `site-b`
+- `site-a-hcp-t1-px`
+- `site-a-hcp-t2-kv`
+- `site-b-hcp-t1-px`
+- `site-b-hcp-t2-kv`
+
+### Verify the physical spokes
+
+```bash
+oc -n site-a get clusterdeployment,agentclusterinstall,infraenv,bmh,agent -o wide
+oc -n site-b get clusterdeployment,agentclusterinstall,infraenv,bmh,agent -o wide
+```
+
+### Verify Hosted Control Planes
+
+```bash
+./scripts/check-hcp-guest-imports.sh
+./scripts/check-hcp-portworx-storage.sh
+```
+
+Check the HCP objects directly on each hosting cluster:
+
+```bash
+oc --kubeconfig "$SITE_A_KUBECONFIG" \
+  -n clusters get hostedcluster,nodepool,pvc
+
+oc --kubeconfig "$SITE_B_KUBECONFIG" \
+  -n clusters get hostedcluster,nodepool,pvc
+```
+
+List the exported tenant kubeconfigs:
+
+```bash
+ls -1 "$HCP_KUBECONFIG_DIR"/*.kubeconfig
+```
+
+Use a tenant kubeconfig:
+
+```bash
+oc --kubeconfig "$HCP_KUBECONFIG_DIR/site-a-hcp-t1-px.kubeconfig" get nodes
+```
+
+## Main Commands
+
+Build or resume only the SNO hub:
+
+```bash
+./scripts/run.sh
+```
+
+Deploy the hub and both physical spokes:
+
+```bash
+./scripts/run-full-hub-and-spoke.sh
+```
+
+Deploy Site-A day-2 configuration:
+
+```bash
+./scripts/run-site-a-day2.sh
+```
+
+Deploy Site-B day-2 configuration:
+
+```bash
+./scripts/run-site-b-day2.sh
+```
+
+Create and import all HCP tenants:
+
+```bash
+./scripts/hcp-create.sh
+```
+
+Troubleshooting information is available in:
+
+```text
+docs/troubleshooting.md
 ```

@@ -42,7 +42,7 @@ site_a_hcp_etcd_storage_class: ""
 ## Apply policies from the hub
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 

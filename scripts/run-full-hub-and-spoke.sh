@@ -85,6 +85,7 @@ run_hub_install_if_needed
 run_playbook playbooks/02_add_sno_extra_disk.yml
 run_playbook playbooks/05_install_lvm_storage.yml
 run_playbook playbooks/06_install_acm.yml
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
 run_playbook playbooks/07_configure_assisted_service.yml
 run_playbook playbooks/07_enable_baremetal_provisioning.yml
 # Site-A

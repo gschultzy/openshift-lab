@@ -73,6 +73,7 @@ run_playbook playbooks/05_install_lvm_storage.yml
 configure_local_become_auth
 run_playbook playbooks/04_configure_ad_dns.yml
 run_playbook playbooks/06_install_acm.yml
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
 run_playbook playbooks/07_configure_assisted_service.yml
 run_playbook playbooks/07_enable_baremetal_provisioning.yml
 run_playbook playbooks/07_validate_assisted_image_service.yml

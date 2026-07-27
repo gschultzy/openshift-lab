@@ -1,16 +1,11 @@
 ---
-# Deprecated location.
-# Put the real encrypted vault file here instead:
-#   inventories/env/group_vars/all/vault.yml
+# Copy this example to vault.yml, replace the CHANGE_ME values, and encrypt it.
 #
-# Normal non-secret variables also live under:
-#   inventories/env/group_vars/all/main.yml
-#
-# Bootstrap:
 #   cp inventories/env/group_vars/all/vault.yml.example inventories/env/group_vars/all/vault.yml
 #   ansible-vault encrypt inventories/env/group_vars/all/vault.yml
-
-# Copy this file to vault.yml, fill in real values, then encrypt it with ansible-vault.
+#
+# Non-secret environment settings belong in main.yml. Secrets belong only in
+# the encrypted vault.yml file.
 
 vault_vcenter_password: "CHANGE_ME"
 vault_esxi_password: "CHANGE_ME"

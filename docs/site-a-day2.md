@@ -20,7 +20,7 @@ This repo is preconfigured for the next Day-2 sequence after the `{{ cluster_nam
 ## Run the full Day-2 flow
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 
 ./scripts/run-site-a-day2.sh

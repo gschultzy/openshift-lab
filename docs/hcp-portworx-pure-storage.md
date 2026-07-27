@@ -13,7 +13,7 @@ Do not install local MCE on Site-A or Site-B. The hub enables the HyperShift add
 ## Create and import HCP tenants
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 
 ./scripts/hcp-create.sh

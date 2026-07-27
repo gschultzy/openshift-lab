@@ -132,7 +132,7 @@ The Ansible controller for this lab is the Ubuntu bastion VM:
 Use the included bootstrap script from the Ubuntu bastion:
 
 ```bash
-cd ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 ./scripts/bootstrap-ubuntu-24.04.sh
 source .venv/bin/activate
 ```
@@ -207,7 +207,7 @@ failed to validate network yaml ... exec: "nmstatectl": executable file not foun
 run the repo helper from the active virtual environment:
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 ./scripts/install-nmstatectl-ubuntu.sh
 command -v nmstatectl
@@ -321,7 +321,7 @@ disk.EnableUUID = TRUE
 If you already generated an ISO before this fix, remove the old build directory and regenerate the ISO so the embedded AgentConfig no longer includes `ens224`:
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 rm -rf build/{{ cluster_name }}
 ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
@@ -811,7 +811,7 @@ Use VLAN ID `0` when the physical ESXi uplink switchport is already access VLAN 
 The repo now includes a Day-2 flow for the hub after `{{ cluster_name }}` is installed:
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 ./scripts/run-site-a-day2.sh
 ```

@@ -24,11 +24,38 @@
 
     - name: Apply ACM namespace, OperatorGroup, and Subscription
       ansible.builtin.command: "oc apply -f {{ acm_rendered_dir }}/{{ item }}"
-      changed_when: true
+      changed_when: "'created' in acm_apply.stdout or 'configured' in acm_apply.stdout"
+      register: acm_apply
       loop:
         - 00-namespace.yaml
         - 01-operatorgroup.yaml
         - 02-subscription.yaml
+
+    - name: Wait for ACM Subscription to select an installed CSV
+      ansible.builtin.command: >-
+        oc -n {{ acm_namespace }} get subscription {{ acm_subscription_name }}
+        -o jsonpath='{.status.installedCSV}'
+      register: acm_installed_csv
+      changed_when: false
+      retries: 80
+      delay: 15
+      until:
+        - acm_installed_csv.rc == 0
+        - acm_installed_csv.stdout | length > 0
+
+    - name: Show selected ACM ClusterServiceVersion
+      ansible.builtin.debug:
+        msg: "ACM Subscription selected CSV {{ acm_installed_csv.stdout }}"
+
+    - name: Wait for the ACM ClusterServiceVersion to succeed
+      ansible.builtin.command: >-
+        oc -n {{ acm_namespace }} get csv {{ acm_installed_csv.stdout }}
+        -o jsonpath='{.status.phase}'
+      register: acm_csv_phase
+      changed_when: false
+      retries: 80
+      delay: 15
+      until: acm_csv_phase.stdout == 'Succeeded'
 
     - name: Wait for MultiClusterHub CRD to appear
       ansible.builtin.command: oc get crd multiclusterhubs.operator.open-cluster-management.io
@@ -38,25 +65,24 @@
       delay: 15
       until: mch_crd.rc == 0
 
-    - name: Create MultiClusterHub
+    - name: Create or update MultiClusterHub
       ansible.builtin.command: "oc apply -f {{ acm_rendered_dir }}/03-multiclusterhub.yaml"
-      changed_when: true
+      register: mch_apply
+      changed_when: "'created' in mch_apply.stdout or 'configured' in mch_apply.stdout"
 
-    - name: Wait for MultiClusterHub to report Running
+    - name: Show initial MultiClusterHub state
       ansible.builtin.command: >-
-        oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }}
-        -o jsonpath='{.status.phase}'
-      register: mch_phase
+        oc -n {{ acm_namespace }} get mch {{ acm_multiclusterhub_name }}
+        -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,AGE:.metadata.creationTimestamp
       changed_when: false
-      retries: 120
-      delay: 30
-      until: mch_phase.stdout == 'Running'
+      register: mch_initial_state
 
-    - name: Show ACM hub state
-      ansible.builtin.command: "oc -n {{ acm_namespace }} get mch {{ acm_multiclusterhub_name }}"
-      changed_when: false
-      register: mch_state
-
-    - name: Print ACM state
+    - name: Print initial MultiClusterHub state
       ansible.builtin.debug:
-        var: mch_state.stdout_lines
+        var: mch_initial_state.stdout_lines
+
+    - name: Explain live ACM wait behavior
+      ansible.builtin.debug:
+        msg:
+          - "The runner now monitors ACM outside Ansible so progress is visible."
+          - "It reports MCH conditions, CSV state, non-ready ACM/MCE pods, degraded cluster operators and recent warnings."

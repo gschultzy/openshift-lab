@@ -9,7 +9,7 @@ This file contains the longer debug and recovery notes that used to live in the 
 Many policy and HCP scripts must run against the hub API, not Site-A or Site-B.
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 
 export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
@@ -347,3 +347,33 @@ This does not delete the VM. It only removes local build artifacts:
 ```bash
 ./scripts/reset-sno-hub-build.sh
 ```
+
+## ACM MultiClusterHub appears stuck in Installing
+
+The main runners use `scripts/wait-acm-ready.sh` after applying the ACM Operator and
+`MultiClusterHub`. The monitor prints the current MCH phase and conditions, OLM CSV
+phase, non-ready ACM/MCE pods, degraded cluster operators, and recent warning events.
+
+Run a one-time diagnostic report with:
+
+```bash
+./scripts/check-acm.sh
+```
+
+Resume the idempotent Site-A flow with:
+
+```bash
+./scripts/run-site-a-day2.sh
+```
+
+The timeout and polling interval are configured in
+`inventories/env/group_vars/all/main.yml`:
+
+```yaml
+acm_wait_timeout_seconds: 3600
+acm_wait_poll_seconds: 30
+```
+
+Do not delete the `MultiClusterHub` merely because installation takes longer than
+expected. First check Pending pods, image pulls, insufficient CPU or memory, failed
+OLM CSVs, PVCs, and warning events using the diagnostic script.

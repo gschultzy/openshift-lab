@@ -423,3 +423,18 @@ Troubleshooting information is available in:
 ```text
 docs/troubleshooting.md
 ```
+
+## Check ACM installation progress
+
+The deployment prints live ACM status while the `MultiClusterHub` is installing.
+To inspect it separately from another terminal:
+
+```bash
+./scripts/check-acm.sh
+```
+
+To resume the Site-A workflow safely:
+
+```bash
+./scripts/run-site-a-day2.sh
+```

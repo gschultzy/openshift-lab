@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_NAME="${1:-ocp-sno-vsphere-ansible}"
+REPO_NAME="${1:-openshift-lab}"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "GitHub CLI 'gh' is not installed. Install it or create the repo manually."

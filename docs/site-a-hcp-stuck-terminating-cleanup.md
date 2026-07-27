@@ -15,7 +15,7 @@ In this lab, the Site-A HCP was also imported into RHACM as `site-a-hcp-t1-px`, 
 ## Cleanup
 
 ```bash
-cd ~/OCP/ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 
 SITE_A_HCP_NAME=site-a-hcp-t1-px ./scripts/force-clean-site-a-hcp.sh

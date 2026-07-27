@@ -300,9 +300,17 @@ acm_install_plan_approval: Automatic
 acm_operator_source: redhat-operators
 acm_operator_source_namespace: openshift-marketplace
 acm_multiclusterhub_name: multiclusterhub
+acm_subscription_name: advanced-cluster-management
 # Basic is much lighter and is preferred for a lab/SNO hub.
 acm_availability_config: Basic
 acm_disable_hub_self_management: false
+
+# ACM installation monitoring. The runner prints MCH conditions, CSV state,
+# non-ready pods and degraded cluster operators while ACM is installing.
+acm_wait_timeout_seconds: 3600
+acm_wait_poll_seconds: 30
+acm_diagnostics_event_lines: 80
+acm_diagnostics_log_lines: 120
 
 # Assisted service persistent storage. Leave storageClass blank to use the cluster default StorageClass.
 assisted_service_configure: true
@@ -373,7 +381,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.81
-    boot_mac: "BC:97:E1:6E:5E:E0"
+    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
     ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -384,7 +392,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.82
-    boot_mac: "BC:97:E1:6E:40:C0"
+    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
     ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -395,7 +403,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.83
-    boot_mac: "BC:97:E1:C3:F1:C0"
+    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
     ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -406,7 +414,7 @@ bm_nodes:
     role: worker
     enabled: false
     bmc_ip: 10.23.74.84
-    boot_mac: "BC:97:E1:6E:6C:10"
+    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -417,7 +425,7 @@ bm_nodes:
     role: worker
     enabled: false
     bmc_ip: 10.23.74.85
-    boot_mac: "BC:97:E1:C3:F6:80"
+    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -428,7 +436,7 @@ bm_nodes:
     role: worker
     enabled: false
     bmc_ip: 10.23.74.86
-    boot_mac: "BC:97:E1:C3:F7:00"
+    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -482,7 +490,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.84
-    boot_mac: "BC:97:E1:6E:6C:10"
+    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -493,7 +501,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.85
-    boot_mac: "BC:97:E1:C3:F6:80"
+    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -504,7 +512,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.86
-    boot_mac: "BC:97:E1:C3:F7:00"
+    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -619,9 +627,9 @@ portworx_hcp_enable_root_volume_cache: false
 portworx_pure_apply_hcp_storageclasses: true
 portworx_hcp_boot_storage_class_is_default: true
 
-# HCP tenant list. The shell scripts use scripts/lib/hcp-tenants.sh as the source of truth,
-# but these inventory values document the intended tenant layout. RHACM ManagedCluster
-# names intentionally match HostedCluster names.
+# HCP tenant list. scripts/lib/hcp-tenants.sh reads this list directly, so tenant names,
+# CIDRs, storage behavior, and RHACM ManagedCluster names are configured here.
+# ManagedCluster names intentionally match HostedCluster names.
 hcp_tenants:
   - site: site-a
     name: site-a-hcp-t1-px

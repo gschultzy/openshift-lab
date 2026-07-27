@@ -30,7 +30,7 @@ On Ubuntu 24.04/Noble, an apt package named `nmstate` might not exist in the ena
 Use the repo helper instead:
 
 ```bash
-cd ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 ./scripts/install-nmstatectl-ubuntu.sh
 command -v nmstatectl
@@ -46,7 +46,7 @@ Ubuntu 24.04 uses Python's externally managed environment model, so do not insta
 Use the repo virtual environment instead:
 
 ```bash
-cd ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip wheel setuptools
@@ -94,7 +94,7 @@ ansible --version
 Every run should start with:
 
 ```bash
-cd ocp-sno-vsphere-ansible
+cd /path/to/openshift-lab
 source .venv/bin/activate
 ```
 

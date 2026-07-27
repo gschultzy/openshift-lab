@@ -5,7 +5,7 @@ Use this only for the lab Site-A HCP test cluster when `clusters-site-a-hcp-t1-p
 The symptom is usually:
 
 ```bash
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig get ns clusters-site-a-hcp-t1-px
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig get ns clusters-site-a-hcp-t1-px
 # NAME                STATUS        AGE
 # clusters-site-a-hcp-t1-px   Terminating   ...
 ```
@@ -23,8 +23,8 @@ SITE_A_HCP_NAME=site-a-hcp-t1-px ./scripts/force-clean-site-a-hcp.sh
 
 The script validates that:
 
-- `build/lab-sno/install/auth/kubeconfig` points at `lab-sno`
-- `build/lab-sno/site-a/auth/kubeconfig` points at `site-a`
+- `build/{{ cluster_name }}/install/auth/kubeconfig` points at `{{ cluster_name }}`
+- `build/{{ cluster_name }}/site-a/auth/kubeconfig` points at `site-a`
 
 Then it:
 
@@ -53,6 +53,6 @@ HCP_RECREATE=true ./scripts/hcp-create.sh
 
 ```bash
 ./scripts/export-hcp-kubeconfigs.sh
-oc --kubeconfig build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig get clusterversion,nodes,co
+oc --kubeconfig build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig get clusterversion,nodes,co
 ```
 

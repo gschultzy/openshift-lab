@@ -1,28 +1,37 @@
 #!/usr/bin/env bash
-# Shared tenant list for HCP lifecycle scripts.
-#
-# Format per line:
-#   site|hostedcluster_name|rhacm_managedcluster_name|cluster_cidr|service_cidr|extra_disks|tenant_px_storage_class|guest_storage_class
-#
-# - extra_disks=true is for the PX tenant shape. It creates the extra FADA disks used by PX storage pools.
-# - extra_disks=false is for the plain KubeVirt tenant shape.
-# - RHACM ManagedCluster name intentionally matches the HostedCluster name. This removes the old
-#   site-a-hcp-t1-px / site-b-hcp-t1-px naming convention.
+# Shared HCP tenant list for lifecycle scripts.
+# Environment-specific tenant names, CIDRs, and storage classes are read from
+# inventories/env/group_vars/all/main.yml under hcp_tenants.
 
-DEFAULT_HCP_TENANTS=$(cat <<'TENANTS'
-site-a|site-a-hcp-t1-px|site-a-hcp-t1-px|10.144.0.0/14|172.32.0.0/16|true|hcp-fada-data|hcp-pxe-data
-site-a|site-a-hcp-t2-kv|site-a-hcp-t2-kv|10.148.0.0/14|172.33.0.0/16|false|hcp-fada-data|hcp-pxe-data
-site-b|site-b-hcp-t1-px|site-b-hcp-t1-px|10.152.0.0/14|172.34.0.0/16|true|hcp-fada-data|hcp-pxe-data
-site-b|site-b-hcp-t2-kv|site-b-hcp-t2-kv|10.156.0.0/14|172.35.0.0/16|false|hcp-fada-data|hcp-pxe-data
-TENANTS
-)
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/inventory-env.sh"
 
 hcp_tenants() {
   if [[ -n "${HCP_TENANTS:-}" ]]; then
     printf '%s\n' "$HCP_TENANTS" | tr ';' '\n' | awk 'NF && $0 !~ /^#/ {print}'
-  else
-    printf '%s\n' "$DEFAULT_HCP_TENANTS" | awk 'NF && $0 !~ /^#/ {print}'
+    return
   fi
+
+  python3 - "$ENV_MAIN_FILE" <<'PY'
+import sys
+from pathlib import Path
+import yaml
+
+path = Path(sys.argv[1])
+data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+for tenant in data.get("hcp_tenants", []):
+    fields = (
+        tenant.get("site", ""),
+        tenant.get("name", ""),
+        tenant.get("managed_cluster_name", tenant.get("name", "")),
+        tenant.get("cluster_cidr", ""),
+        tenant.get("service_cidr", ""),
+        str(bool(tenant.get("enable_extra_disks", False))).lower(),
+        tenant.get("tenant_px_storage_class", ""),
+        tenant.get("guest_storage_class", ""),
+    )
+    print("|".join(str(value) for value in fields))
+PY
 }
 
 hcp_tenants_for_site() {
@@ -35,37 +44,50 @@ hcp_tenant_count() {
 }
 
 hcp_tenant_site_label() {
-  case "$1" in
-    site-a) printf 'Site-A' ;;
-    site-b) printf 'Site-B' ;;
-    *) printf '%s' "$1" ;;
-  esac
+  local site="$1"
+  if [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]]; then
+    inventory_value bm_cluster_display_name
+  elif [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]]; then
+    inventory_value site_b_cluster_display_name
+  else
+    printf '%s' "$site"
+  fi
 }
 
 hcp_tenant_ansible_prefix() {
-  case "$1" in
-    site-a) printf 'site_a' ;;
-    site-b) printf 'site_b' ;;
-    *) echo "ERROR: unknown HCP tenant site '$1'" >&2; return 1 ;;
-  esac
+  local site="$1"
+  if [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]]; then
+    printf 'site_a'
+  elif [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]]; then
+    printf 'site_b'
+  else
+    echo "ERROR: unknown HCP tenant site '$site'" >&2
+    return 1
+  fi
 }
 
 hcp_tenant_site_kubeconfig() {
   local site="$1"
-  local root_dir="${2:-$PWD}"
-  case "$site" in
-    site-a) printf '%s/build/lab-sno/site-a/auth/kubeconfig' "$root_dir" ;;
-    site-b) printf '%s/build/lab-sno/site-b/auth/kubeconfig' "$root_dir" ;;
-    *) echo "ERROR: unknown HCP tenant site '$site'" >&2; return 1 ;;
-  esac
+  if [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]]; then
+    printf '%s' "$ENV_SITE_A_KUBECONFIG"
+  elif [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]]; then
+    printf '%s' "$ENV_SITE_B_KUBECONFIG"
+  else
+    echo "ERROR: unknown HCP tenant site '$site'" >&2
+    return 1
+  fi
 }
 
 hcp_tenant_playbook() {
-  case "$1" in
-    site-a) printf 'playbooks/14_create_site_a_hcp_kubevirt_cluster.yml' ;;
-    site-b) printf 'playbooks/14_create_site_b_hcp_kubevirt_cluster.yml' ;;
-    *) echo "ERROR: unknown HCP tenant site '$1'" >&2; return 1 ;;
-  esac
+  local site="$1"
+  if [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]]; then
+    printf 'playbooks/14_create_site_a_hcp_kubevirt_cluster.yml'
+  elif [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]]; then
+    printf 'playbooks/14_create_site_b_hcp_kubevirt_cluster.yml'
+  else
+    echo "ERROR: unknown HCP tenant site '$site'" >&2
+    return 1
+  fi
 }
 
 hcp_tenant_kubeconfig_path() {

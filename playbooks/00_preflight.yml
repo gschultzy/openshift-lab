@@ -6,6 +6,8 @@
     - name: Validate required inventory variables are loaded
       ansible.builtin.assert:
         that:
+          - ocp_version is defined
+          - ocp_release_version is defined
           - cluster_name is defined
           - base_domain is defined
           - sno_install_platform is defined
@@ -62,6 +64,8 @@
       ansible.builtin.debug:
         msg:
           - "Cluster: {{ cluster_name }}.{{ base_domain }}"
+          - "OpenShift release: {{ ocp_release_version }} (minor {{ ocp_version }})"
+          - "Release image: {{ bm_cluster_release_image }}"
           - "Install platform: {{ sno_install_platform }}"
           - "SNO node IP: {{ sno_node.ip }}"
           - "API DNS target: {{ sno_api_ip }}"
@@ -163,6 +167,39 @@
         - sshpass
         - tar
         - nmstatectl
+
+    - name: Read installed OpenShift installer version
+      ansible.builtin.command: openshift-install version
+      environment:
+        PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
+      changed_when: false
+      register: openshift_installer_version
+
+    - name: Read installed OpenShift client version
+      ansible.builtin.command: oc version --client
+      environment:
+        PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
+      changed_when: false
+      register: openshift_client_version
+
+    - name: Validate the pinned OpenShift release and installed tools match
+      ansible.builtin.assert:
+        that:
+          - "ocp_release_version is match('^' ~ (ocp_version | regex_escape) ~ '\\.[0-9]+$')"
+          - "ocp_release_version in openshift_installer_version.stdout"
+          - "ocp_release_version in openshift_client_version.stdout"
+        fail_msg: >-
+          The inventory pins OpenShift {{ ocp_release_version }}, but the installed
+          oc and/or openshift-install binary does not match. Run
+          OPENSHIFT_VERSION={{ ocp_release_version }} ./scripts/bootstrap-ubuntu-24.04.sh
+          and then rerun preflight.
+
+    - name: Show validated OpenShift tool versions
+      ansible.builtin.debug:
+        msg:
+          - "Pinned release: {{ ocp_release_version }}"
+          - "openshift-install: {{ openshift_installer_version.stdout_lines | first }}"
+          - "oc client: {{ openshift_client_version.stdout_lines | first }}"
 
     - name: Show nmstatectl version
       ansible.builtin.command: bash -lc 'nmstatectl --version || nmstatectl -h | head -1'

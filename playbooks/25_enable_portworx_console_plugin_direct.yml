@@ -21,7 +21,7 @@
     - name: Stop if running against Site-A or Site-B
       ansible.builtin.fail:
         msg: |
-          Refusing to enable the console plugin because this kubeconfig is not lab-sno.
+          Refusing to enable the console plugin because this kubeconfig is not {{ cluster_name }}.
 
           Current API server: {{ portworx_console_hub_api_server.stdout }}
           Expected: api.{{ cluster_name }}.{{ base_domain }}

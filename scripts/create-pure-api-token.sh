@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/lib/inventory-env.sh
+source scripts/lib/inventory-env.sh
+
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck source=/dev/null
   source .venv/bin/activate
@@ -11,7 +14,7 @@ else
   exit 1
 fi
 
-INV="inventories/env/hosts.yml"
+INV="${INV:-$ENV_INVENTORY_FILE}"
 
 if ! ansible-galaxy collection list purestorage.flasharray >/dev/null 2>&1; then
   echo "purestorage.flasharray collection is missing; installing requirements.yml" >&2

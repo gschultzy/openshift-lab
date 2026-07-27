@@ -2,10 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$ROOT_DIR/scripts/lib/inventory-env.sh"
 cd "$ROOT_DIR"
 
-INV="${INV:-inventories/env/hosts.yml}"
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-${KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}}"
+INV="${INV:-$ENV_INVENTORY_FILE}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-${KUBECONFIG:-$ENV_HUB_KUBECONFIG}}"
 export HUB_KUBECONFIG
 export KUBECONFIG="$HUB_KUBECONFIG"
 
@@ -18,8 +20,8 @@ server="$(oc --kubeconfig "$HUB_KUBECONFIG" whoami --show-server 2>/dev/null || 
 echo "Using hub kubeconfig: $HUB_KUBECONFIG"
 echo "Hub API server: $server"
 
-if [[ "$server" != *"api.lab-sno."* && "$server" != *"lab-sno"* ]]; then
-  echo "ERROR: this kubeconfig does not point at lab-sno. Do not continue." >&2
+if [[ "$server" != *"$ENV_HUB_API_HOST"* ]]; then
+  echo "ERROR: this kubeconfig does not point at the configured hub. Do not continue." >&2
   exit 1
 fi
 

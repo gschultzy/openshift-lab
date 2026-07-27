@@ -4,7 +4,7 @@ For Dell R6525 hosts, do not assume the Linux interface name is `eno1`.
 The iDRAC inventory shows hardware ports and MAC addresses, while RHCOS may name
 the same port `eno33np0`, `eno34np1`, etc.
 
-For the current b10-30 console, RHCOS displays:
+For the current {{ bm_nodes[0].name }} console, RHCOS displays:
 
 ```text
 eno33np0:
@@ -19,10 +19,10 @@ primary_interface: eno33np0
 The iDRAC screenshot shows Integrated NIC 1 Port 1 / Partition 1 has MAC:
 
 ```text
-BC:97:E1:C3:F6:E0
+{{ bm_nodes[0].boot_mac }}
 ```
 
-That MAC is valid for b10-30. The problem was the interface name, not necessarily
+That MAC is valid for {{ bm_nodes[0].name }}. The problem was the interface name, not necessarily
 the MAC.
 
 Run discovery:
@@ -34,7 +34,7 @@ ansible-playbook -i inventories/env/hosts.yml playbooks/05_discover_idrac_nics.y
 Then confirm the rendered NMStateConfig:
 
 ```bash
-oc -n site-a get nmstateconfig b10-30 -o yaml
+oc -n site-a get nmstateconfig {{ bm_nodes[0].name }} -o yaml
 ```
 
 If Site-A objects were already created with the wrong interface name, reset and

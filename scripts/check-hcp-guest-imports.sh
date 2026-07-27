@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/lib/hcp-tenants.sh
 source scripts/lib/hcp-tenants.sh
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 
 hub_oc() { oc --kubeconfig "$HUB_KUBECONFIG" "$@"; }
 

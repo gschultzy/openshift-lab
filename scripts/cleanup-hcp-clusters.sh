@@ -14,12 +14,12 @@ cd "$ROOT_DIR"
 # shellcheck source=scripts/lib/hcp-tenants.sh
 source scripts/lib/hcp-tenants.sh
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}"
-SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
-SITEB_KUBECONFIG="${SITEB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
+SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$ENV_SITE_A_KUBECONFIG}"
+SITEB_KUBECONFIG="${SITEB_KUBECONFIG:-$ENV_SITE_B_KUBECONFIG}"
 
 HCP_NAMESPACE="${HCP_NAMESPACE:-clusters}"
-HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/lab-sno/hcp-kubeconfigs}"
+HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ENV_HCP_KUBECONFIG_DIR}"
 HCP_WAIT_SECONDS="${HCP_WAIT_SECONDS:-900}"
 HCP_WAIT_INTERVAL="${HCP_WAIT_INTERVAL:-15}"
 HCP_FORCE_CLEANUP="${HCP_FORCE_CLEANUP:-false}"
@@ -64,7 +64,7 @@ require_contexts() {
   echo "Site-A API: $SITEA_API"
   echo "Site-B API: $SITEB_API"
 
-  [[ "$HUB_API" == *"lab-sno"* ]] || die "HUB_KUBECONFIG does not look like lab-sno. Refusing to continue."
+  [[ "$HUB_API" == *"$ENV_HUB_API_HOST"* ]] || die "HUB_KUBECONFIG does not point to the configured hub. Refusing to continue."
   [[ "$SITEA_API" == *"site-a"* ]] || die "SITEA_KUBECONFIG does not look like site-a. Refusing to continue."
   [[ "$SITEB_API" == *"site-b"* ]] || die "SITEB_KUBECONFIG does not look like site-b. Refusing to continue."
 }

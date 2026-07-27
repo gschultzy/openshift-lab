@@ -7,15 +7,15 @@ cd "$(dirname "$0")/.."
 source scripts/lib/hcp-tenants.sh
 
 ROOT_DIR="$PWD"
-SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
-SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
-HCP_NAMESPACE="${HCP_NAMESPACE:-clusters}"
-OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/lab-sno/hcp-kubeconfigs}"
+SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ENV_SITE_A_KUBECONFIG}"
+SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ENV_SITE_B_KUBECONFIG}"
+HCP_NAMESPACE="${HCP_NAMESPACE:-$ENV_HCP_NAMESPACE}"
+OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ENV_HCP_KUBECONFIG_DIR}"
 HCP_BIN="${HCP_BIN:-}"
 
 if [[ -z "$HCP_BIN" ]]; then
-  if [[ -x "$PWD/build/lab-sno/bin/hcp" ]]; then
-    HCP_BIN="$PWD/build/lab-sno/bin/hcp"
+  if [[ -x "$ENV_BUILD_ROOT/bin/hcp" ]]; then
+    HCP_BIN="$ENV_BUILD_ROOT/bin/hcp"
   elif command -v hcp >/dev/null 2>&1; then
     HCP_BIN="$(command -v hcp)"
   else
@@ -140,11 +140,14 @@ extract_one() {
 }
 
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
-  case "$site" in
-    site-a) site_kubeconfig="$SITE_A_KUBECONFIG" ;;
-    site-b) site_kubeconfig="$SITE_B_KUBECONFIG" ;;
-    *) echo "ERROR: unknown site in HCP tenant list: $site" >&2; exit 1 ;;
-  esac
+  if [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]]; then
+    site_kubeconfig="$SITE_A_KUBECONFIG"
+  elif [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]]; then
+    site_kubeconfig="$SITE_B_KUBECONFIG"
+  else
+    echo "ERROR: unknown site in HCP tenant list: $site" >&2
+    exit 1
+  fi
   extract_one "$(hcp_tenant_site_label "$site") $name" "$site_kubeconfig" "$HCP_NAMESPACE" "$name" "$OUT_DIR/${name}.kubeconfig"
 done < <(hcp_tenants)
 

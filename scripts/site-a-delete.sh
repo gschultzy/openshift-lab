@@ -3,12 +3,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CLUSTER_NAME="site-a"
-POLICY_NS="site-a-policies"
-CLUSTERSET="site-a-baremetal"
+# shellcheck source=scripts/lib/inventory-env.sh
+source scripts/lib/inventory-env.sh
+
+CLUSTER_NAME="$ENV_SITE_A_CLUSTER_NAME"
+POLICY_NS="$ENV_SITE_A_POLICY_NAMESPACE"
+CLUSTERSET="$ENV_SITE_A_CLUSTERSET"
 CONFIRM_VAR="CONFIRM_DELETE_SITE_A"
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 
 if [[ ! -s "$HUB_KUBECONFIG" ]]; then
   echo "Hub kubeconfig not found: $HUB_KUBECONFIG" >&2

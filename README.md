@@ -3,15 +3,28 @@
 This repo builds this lab:
 
 ```text
-lab-sno = vSphere SNO hub with RHACM/MCE/Assisted Installer
-site-a  = bare-metal OpenShift hosting cluster: b10-30, b10-31, b10-33
-site-b  = bare-metal OpenShift hosting cluster: b10-34, b10-35, b10-36
-HCPs    = hosted control planes created on Site-A and Site-B
+{{ cluster_name }} = vSphere SNO hub with RHACM/MCE/Assisted Installer
+{{ bm_cluster_name }} = bare-metal hosting cluster using enabled entries in bm_nodes
+{{ site_b_cluster_name }} = bare-metal hosting cluster using enabled entries in site_b_nodes
+HCPs = hosted control planes defined by hcp_tenants
 ```
 
 Site-A and Site-B are **managed spoke / hosting clusters**. Do not install a second local RHACM/MCE hub on Site-A or Site-B. The hub manages them and enables the HyperShift add-on.
 
 Detailed fixes and troubleshooting have been moved to [`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+
+All environment-specific values are stored in:
+
+```text
+inventories/env/group_vars/all/main.yml
+```
+
+Shell helpers load that file through `scripts/lib/inventory-env.sh`; the HCP tenant list is loaded from `hcp_tenants` rather than duplicated in shell scripts. To print the current values:
+
+```bash
+./scripts/show-environment-config.sh
+```
 
 ---
 
@@ -41,13 +54,12 @@ vi inventories/env/group_vars/all/main.yml
 Important defaults in this lab:
 
 ```text
-Hub API:        api.lab-sno.poc.local
-Site-A API:     api.site-a.poc.local
-Site-B API:     api.site-b.poc.local
-Site-A nodes:   b10-30, b10-31, b10-33
-Site-B nodes:   b10-34, b10-35, b10-36
-Primary array:  10.23.74.50
-Secondary array: 10.23.74.60 (staged; disabled)
+Hub API:        {{ hub_api_hostname }}
+Site-A API:     api.{{ bm_cluster_name }}.{{ bm_base_domain }}
+Site-B API:     api.{{ site_b_cluster_name }}.{{ site_b_base_domain }}
+Site-A nodes:   enabled entries in bm_nodes
+Site-B nodes:   enabled entries in site_b_nodes
+Pure array:     {{ pure_flasharray_mgmt_endpoint }}
 ```
 
 The scripts ask for the Ansible Vault password once and reuse it. You can also provide a vault password file:
@@ -69,7 +81,7 @@ Create the SNO hub VM and wait for OpenShift to install:
 Verify the hub:
 
 ```bash
-export HUB_KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 export KUBECONFIG=$HUB_KUBECONFIG
 
 oc get nodes
@@ -116,7 +128,7 @@ These site scripts do the hub day-2 work that is needed before bare-metal cluste
 Verify from the hub:
 
 ```bash
-export HUB_KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 export KUBECONFIG=$HUB_KUBECONFIG
 
 oc get managedcluster
@@ -174,7 +186,7 @@ Or manually:
 
 ```bash
 for site in site-a site-b; do
-  K="build/lab-sno/${site}/auth/kubeconfig"
+  K="build/{{ cluster_name }}/${site}/auth/kubeconfig"
   echo
   echo "### $site"
   oc --kubeconfig "$K" -n portworx get storagecluster
@@ -206,28 +218,28 @@ This creates two tenants on each hosting site:
 
 | Site | HostedCluster | RHACM ManagedCluster | Shape | Pod CIDR | Service CIDR |
 |---|---|---|---|---|---|
-| Site-A | `site-a-hcp-t1-px` | `site-a-hcp-t1-px` | PX tenant, extra FADA disks | `10.144.0.0/14` | `172.32.0.0/16` |
-| Site-A | `site-a-hcp-t2-kv` | `site-a-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `10.148.0.0/14` | `172.33.0.0/16` |
-| Site-B | `site-b-hcp-t1-px` | `site-b-hcp-t1-px` | PX tenant, extra FADA disks | `10.152.0.0/14` | `172.34.0.0/16` |
-| Site-B | `site-b-hcp-t2-kv` | `site-b-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `10.156.0.0/14` | `172.35.0.0/16` |
+| Site-A | `site-a-hcp-t1-px` | `site-a-hcp-t1-px` | PX tenant, extra FADA disks | `{{ hcp_tenants[0].cluster_cidr }}` | `{{ hcp_tenants[0].service_cidr }}` |
+| Site-A | `site-a-hcp-t2-kv` | `site-a-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `{{ hcp_tenants[1].cluster_cidr }}` | `{{ hcp_tenants[1].service_cidr }}` |
+| Site-B | `site-b-hcp-t1-px` | `site-b-hcp-t1-px` | PX tenant, extra FADA disks | `{{ hcp_tenants[2].cluster_cidr }}` | `{{ hcp_tenants[2].service_cidr }}` |
+| Site-B | `site-b-hcp-t2-kv` | `site-b-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `{{ hcp_tenants[3].cluster_cidr }}` | `{{ hcp_tenants[3].service_cidr }}` |
 
 The tenant list is defined in `scripts/lib/hcp-tenants.sh`. RHACM import names intentionally match the HostedCluster names.
 
 Check the HCPs:
 
 ```bash
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/lab-sno/install/auth/kubeconfig get managedcluster
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig get managedcluster
 ```
 
 Exported guest kubeconfigs are written here:
 
 ```text
-build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
-build/lab-sno/hcp-kubeconfigs/site-a-hcp-t2-kv.kubeconfig
-build/lab-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
-build/lab-sno/hcp-kubeconfigs/site-b-hcp-t2-kv.kubeconfig
+build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
+build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t2-kv.kubeconfig
+build/{{ cluster_name }}/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
+build/{{ cluster_name }}/hcp-kubeconfigs/site-b-hcp-t2-kv.kubeconfig
 ```
 
 Destroy all HCP tenants:

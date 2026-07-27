@@ -3,16 +3,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/lib/inventory-env.sh
+source scripts/lib/inventory-env.sh
+
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck source=/dev/null
   source .venv/bin/activate
 fi
 
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 # Repair/restore the hub kubeconfig first if it was accidentally overwritten by a spoke kubeconfig.
 "$PWD/scripts/repair-hub-kubeconfig.sh"
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
 if [[ ! -s "$KUBECONFIG" ]]; then
@@ -26,8 +29,8 @@ echo
 oc --kubeconfig "$KUBECONFIG" get managedcluster -o wide || true
 
 echo
-if ! oc --kubeconfig "$KUBECONFIG" whoami --show-server | grep -q 'api.lab-sno.poc.local'; then
-  echo "ERROR: this kubeconfig does not point at lab-sno. Do not continue." >&2
+if ! oc --kubeconfig "$KUBECONFIG" whoami --show-server | grep -Fq "$ENV_HUB_API_HOST"; then
+  echo "ERROR: this kubeconfig does not point at the configured hub. Do not continue." >&2
   exit 1
 fi
 

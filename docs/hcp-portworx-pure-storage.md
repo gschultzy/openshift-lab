@@ -3,7 +3,7 @@
 This lab has one supported HCP lifecycle:
 
 ```text
-lab-sno = RHACM + MCE
+{{ cluster_name }} = RHACM + MCE
 site-a  = RHACM managed hosting cluster
 site-b  = RHACM managed hosting cluster
 ```
@@ -23,10 +23,10 @@ This creates and imports four tenants:
 
 | Site | HostedCluster | RHACM ManagedCluster | Shape | Pod CIDR | Service CIDR |
 |---|---|---|---|---|---|
-| Site-A | `site-a-hcp-t1-px` | `site-a-hcp-t1-px` | PX tenant, extra FADA disks | `10.144.0.0/14` | `172.32.0.0/16` |
-| Site-A | `site-a-hcp-t2-kv` | `site-a-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `10.148.0.0/14` | `172.33.0.0/16` |
-| Site-B | `site-b-hcp-t1-px` | `site-b-hcp-t1-px` | PX tenant, extra FADA disks | `10.152.0.0/14` | `172.34.0.0/16` |
-| Site-B | `site-b-hcp-t2-kv` | `site-b-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `10.156.0.0/14` | `172.35.0.0/16` |
+| Site-A | `site-a-hcp-t1-px` | `site-a-hcp-t1-px` | PX tenant, extra FADA disks | `{{ hcp_tenants[0].cluster_cidr }}` | `{{ hcp_tenants[0].service_cidr }}` |
+| Site-A | `site-a-hcp-t2-kv` | `site-a-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `{{ hcp_tenants[1].cluster_cidr }}` | `{{ hcp_tenants[1].service_cidr }}` |
+| Site-B | `site-b-hcp-t1-px` | `site-b-hcp-t1-px` | PX tenant, extra FADA disks | `{{ hcp_tenants[2].cluster_cidr }}` | `{{ hcp_tenants[2].service_cidr }}` |
+| Site-B | `site-b-hcp-t2-kv` | `site-b-hcp-t2-kv` | KubeVirt tenant, no extra PX disks | `{{ hcp_tenants[3].cluster_cidr }}` | `{{ hcp_tenants[3].service_cidr }}` |
 
 The tenant list is defined in `scripts/lib/hcp-tenants.sh`. RHACM ManagedCluster names intentionally match HostedCluster names.
 
@@ -57,11 +57,11 @@ The `*-t1-px` tenants get three extra disks on `hcp-fada-data` for tenant Portwo
 ## Checks
 
 ```bash
-oc --kubeconfig build/lab-sno/install/auth/kubeconfig get managedcluster
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig get managedcluster
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool
 
-for k in build/lab-sno/hcp-kubeconfigs/*.kubeconfig; do
+for k in build/{{ cluster_name }}/hcp-kubeconfigs/*.kubeconfig; do
   echo "### $k"
   oc --kubeconfig "$k" get clusterversion,nodes
 fi

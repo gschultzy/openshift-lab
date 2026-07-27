@@ -49,11 +49,11 @@ portworx_pure_enable_iscsid: false
 ## FlashArray details in this lab
 
 ```yaml
-pure_flasharray_name: SV16-X90R4-B10-01
-pure_flasharray_mgmt_endpoint: 10.23.74.50
-pure_flasharray_ct0_endpoint: 10.23.74.51
-pure_flasharray_ct1_endpoint: 10.23.74.52
-pure_flasharray_file_vip: 10.23.74.55
+pure_flasharray_name: {{ pure_flasharray_name }}
+pure_flasharray_mgmt_endpoint: {{ pure_flasharray_mgmt_endpoint }}
+pure_flasharray_ct0_endpoint: {{ pure_flasharray_ct0_endpoint }}
+pure_flasharray_ct1_endpoint: {{ pure_flasharray_ct1_endpoint }}
+pure_flasharray_file_vip: {{ pure_flasharray_file_vip }}
 pure_flasharray_username: pureuser
 portworx_pure_san_type: FC
 ```
@@ -72,7 +72,7 @@ ansible-vault edit inventories/env/group_vars/all/vault.yml
 Add:
 
 ```yaml
-vault_pure_flasharray_api_token: "<FLASHARRAY_API_TOKEN>"
+vault_pure_flasharray_api_token: "{{ FLASHARRAY_API_TOKEN }}"
 ```
 
 Generate the token on the FlashArray using the UI or CLI. CLI example:
@@ -96,7 +96,7 @@ This applies only the MachineConfig policy. It does not require the FlashArray A
 ```bash
 cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
-export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 
 ./scripts/run-portworx-pure-node-prep.sh
 ```
@@ -133,13 +133,13 @@ Manual checks:
 ```bash
 oc -n portworx-pure-policies get policy,placement,placementdecision
 
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig get mcp
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n portworx get pods,storagecluster,secret/px-pure-secret
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig get sc
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig get mcp
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig -n portworx get pods,storagecluster,secret/px-pure-secret
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig get sc
 
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig get mcp
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n portworx get pods,storagecluster,secret/px-pure-secret
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig get sc
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig get mcp
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig -n portworx get pods,storagecluster,secret/px-pure-secret
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig get sc
 ```
 
 ## Notes
@@ -162,7 +162,7 @@ ansible-vault edit inventories/env/group_vars/all/vault.yml
 Add:
 
 ```yaml
-vault_pure_flasharray_password: "<FLASHARRAY_LOGIN_PASSWORD>"
+vault_pure_flasharray_password: "{{ FLASHARRAY_LOGIN_PASSWORD }}"
 ```
 
 Then create/rotate the API token:
@@ -174,13 +174,13 @@ Then create/rotate the API token:
 The generated token is written to:
 
 ```text
-build/lab-sno/pure/generated-flasharray-token.yml
+build/{{ cluster_name }}/pure/generated-flasharray-token.yml
 ```
 
 The file is local-only, mode `0600`, and under `build/`, so it is not committed to git. The Portworx policy playbook automatically loads it. If you prefer to manage the token yourself, put this directly in the encrypted vault instead:
 
 ```yaml
-vault_pure_flasharray_api_token: "<FLASHARRAY_API_TOKEN>"
+vault_pure_flasharray_api_token: "{{ FLASHARRAY_API_TOKEN }}"
 ```
 
 One-shot flow:
@@ -222,7 +222,7 @@ StorageCluster:
 ```bash
 cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
-export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 
 ./scripts/run-portworx-console-plugin.sh
 ```
@@ -230,13 +230,13 @@ export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
 Validate it from each spoke:
 
 ```bash
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig get consoleplugin portworx
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n portworx get pods | egrep -i 'px-plugin|plugin|proxy|cache|NAME'
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig get consoleplugin portworx
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig -n portworx get pods | egrep -i 'px-plugin|plugin|proxy|cache|NAME'
 
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig get consoleplugin portworx
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n portworx get pods | egrep -i 'px-plugin|plugin|proxy|cache|NAME'
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig get consoleplugin portworx
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig -n portworx get pods | egrep -i 'px-plugin|plugin|proxy|cache|NAME'
 ```
 
 Refresh the OpenShift Console browser tab after the policy applies. You should see
@@ -259,8 +259,8 @@ Run only the console-plugin portion with:
 Validate with:
 
 ```bash
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig get console.operator cluster -o jsonpath='{.spec.plugins}{"\n"}'
 ```
 
 ## Fix stale local ACM/MCE API discovery on Site-A/Site-B
@@ -278,7 +278,7 @@ then Site-A/Site-B still have stale local ACM/MCE aggregated API registrations l
 Run this from the RHACM hub context:
 
 ```bash
-export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 ./scripts/cleanup-stale-ocm-apis-on-spokes.sh
 ./scripts/check-portworx-pure.sh
 ```

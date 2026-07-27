@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$ROOT_DIR/scripts/lib/inventory-env.sh"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 for entry in \
-  "Site-A:build/lab-sno/site-a/auth/kubeconfig" \
-  "Site-B:build/lab-sno/site-b/auth/kubeconfig"; do
+  "${ENV_SITE_A_CLUSTER_NAME}:${ENV_SITE_A_KUBECONFIG}" \
+  "${ENV_SITE_B_CLUSTER_NAME}:${ENV_SITE_B_KUBECONFIG}"; do
   display="${entry%%:*}"
   k="${entry#*:}"
 

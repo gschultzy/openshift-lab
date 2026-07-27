@@ -14,7 +14,7 @@ fi
 # shellcheck source=scripts/lib/hcp-tenants.sh
 source scripts/lib/hcp-tenants.sh
 
-INV="inventories/env/hosts.yml"
+INV="${INV:-$ENV_INVENTORY_FILE}"
 ROOT_DIR="$PWD"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
@@ -32,11 +32,11 @@ else
   VAULT_ARGS=(--vault-password-file "$VAULT_PASSWORD_FILE_TMP")
 fi
 
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
 # Common HCP namespace and storage defaults.
-export HCP_NAMESPACE="${HCP_NAMESPACE:-clusters}"
+export HCP_NAMESPACE="${HCP_NAMESPACE:-$ENV_HCP_NAMESPACE}"
 export HCP_ETCD_STORAGE_CLASS="${HCP_ETCD_STORAGE_CLASS:-${HCP_STORAGE_CLASS:-hcp-pxe-etcd-pxfast}}"
 export HCP_ROOT_STORAGE_CLASS="${HCP_ROOT_STORAGE_CLASS:-${HCP_STORAGE_CLASS:-hcp-pxe-boot}}"
 export HCP_DATA_STORAGE_CLASS="${HCP_DATA_STORAGE_CLASS:-${HCP_STORAGE_CLASS:-hcp-pxe-data}}"
@@ -53,7 +53,7 @@ export HCP_RECREATE="${HCP_RECREATE:-false}"
 export HCP_NODEPOOL_REPLICAS="${HCP_NODEPOOL_REPLICAS:-3}"
 export HCP_WORKER_CORES="${HCP_WORKER_CORES:-8}"
 export HCP_WORKER_MEMORY="${HCP_WORKER_MEMORY:-8Gi}"
-export HCP_CHANNEL="${HCP_CHANNEL:-fast-4.21}"
+export HCP_CHANNEL="${HCP_CHANNEL:-fast-4.22}"
 export HCP_ETCD_VOLUME_SIZE="${HCP_ETCD_VOLUME_SIZE:-8Gi}"
 export HCP_KUBECONFIG_WAIT_RETRIES="${HCP_KUBECONFIG_WAIT_RETRIES:-90}"
 export HCP_KUBECONFIG_WAIT_DELAY="${HCP_KUBECONFIG_WAIT_DELAY:-10}"
@@ -67,9 +67,9 @@ export HCP_IMPORT_FORCE_CLEANUP="${HCP_IMPORT_FORCE_CLEANUP:-true}"
 # bootstrap the HyperShift operator on the spoke with `hcp install render`.
 export HCP_DIRECT_HYPERSHIFT_INSTALL="${HCP_DIRECT_HYPERSHIFT_INSTALL:-true}"
 
-SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
-SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
-HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/lab-sno/hcp-kubeconfigs}"
+SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ENV_SITE_A_KUBECONFIG}"
+SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ENV_SITE_B_KUBECONFIG}"
+HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ENV_HCP_KUBECONFIG_DIR}"
 
 say() { printf '\n### %s\n' "$*"; }
 
@@ -249,12 +249,12 @@ ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbook
 
 say "Create Site-A tenants"
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
-  [[ "$site" == "site-a" ]] || continue
+  [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]] || continue
   vars=()
   read_tenant_extra_vars vars "$site" "$name" "$cluster_cidr" "$service_cidr" "$extra_disks" "${tenant_px_sc:-$HCP_TENANT_PX_STORAGE_CLASS}" "${guest_sc:-$HCP_GUEST_STORAGE_CLASS}"
   say "Create ${name} on Site-A"
   ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" "${vars[@]}" "$(hcp_tenant_playbook "$site")"
-done < <(hcp_tenants_for_site site-a)
+done < <(hcp_tenants_for_site "$ENV_SITE_A_CLUSTER_NAME")
 
 say "Prepare Site-B HCP prerequisites"
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/12_apply_site_b_hcp_policies.yml
@@ -263,12 +263,12 @@ ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbook
 
 say "Create Site-B tenants"
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
-  [[ "$site" == "site-b" ]] || continue
+  [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]] || continue
   vars=()
   read_tenant_extra_vars vars "$site" "$name" "$cluster_cidr" "$service_cidr" "$extra_disks" "${tenant_px_sc:-$HCP_TENANT_PX_STORAGE_CLASS}" "${guest_sc:-$HCP_GUEST_STORAGE_CLASS}"
   say "Create ${name} on Site-B"
   ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" "${vars[@]}" "$(hcp_tenant_playbook "$site")"
-done < <(hcp_tenants_for_site site-b)
+done < <(hcp_tenants_for_site "$ENV_SITE_B_CLUSTER_NAME")
 
 say "Wait for tenant admin kubeconfig secrets"
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do

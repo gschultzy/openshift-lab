@@ -21,12 +21,12 @@
         msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
       when: not hub_kubeconfig_stat.stat.exists
 
-    - name: Validate playbook is running against lab-sno
+    - name: Validate playbook is running against {{ cluster_name }}
       ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
       changed_when: false
       register: cleanup_hub_api_server
 
-    - name: Stop if kubeconfig is not lab-sno
+    - name: Stop if kubeconfig is not {{ cluster_name }}
       ansible.builtin.fail:
         msg: |
           Refusing to clean up Site-A/Site-B from a non-hub context.

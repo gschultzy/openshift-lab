@@ -10,7 +10,7 @@
 
     - name: Stop if hub kubeconfig is missing
       ansible.builtin.fail:
-        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Set HUB_KUBECONFIG to the lab-sno kubeconfig or complete the hub install first."
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}. Set HUB_KUBECONFIG to the {{ cluster_name }} kubeconfig or complete the hub install first."
       when: not hub_kubeconfig_stat.stat.exists
 
     - name: Read current API server and managed clusters from supplied kubeconfig
@@ -41,7 +41,7 @@
       changed_when: false
       register: hub_api_server
 
-    - name: Stop if kubeconfig points at a spoke instead of lab-sno
+    - name: Stop if kubeconfig points at a spoke instead of {{ cluster_name }}
       ansible.builtin.fail:
         msg: |
           This kubeconfig is not pointing at the RHACM hub.

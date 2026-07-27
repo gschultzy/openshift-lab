@@ -46,7 +46,7 @@ hosts:
 {% endfor %}
       routes:
         config:
-          - destination: 0.0.0.0/0
+          - destination: {{ default_ipv4_route_cidr }}
             next-hop-address: {{ gateway }}
             next-hop-interface: {{ sno_node.primary_interface }}
             table-id: 254

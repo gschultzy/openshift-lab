@@ -24,7 +24,7 @@
     - name: Stop if running against Site-A or Site-B
       ansible.builtin.fail:
         msg: |
-          Refusing to wait/apply Portworx policies because this kubeconfig is not lab-sno.
+          Refusing to wait/apply Portworx policies because this kubeconfig is not {{ cluster_name }}.
 
           Current API server: {{ wait_portworx_pure_api_server.stdout }}
           Expected: api.{{ cluster_name }}.{{ base_domain }}

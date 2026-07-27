@@ -2,11 +2,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$REPO_ROOT/scripts/lib/inventory-env.sh"
 cd "$REPO_ROOT"
 
-HUB_CLUSTER_NAME="${HUB_CLUSTER_NAME:-lab-sno}"
+HUB_CLUSTER_NAME="${HUB_CLUSTER_NAME:-$ENV_CLUSTER_NAME}"
 HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/${HUB_CLUSTER_NAME}/install/auth/kubeconfig}"
-EXPECTED_API_HOST="api.${HUB_CLUSTER_NAME}.poc.local"
+EXPECTED_API_HOST="${ENV_HUB_API_HOST}"
 
 server_for() {
   local kc="$1"
@@ -32,14 +34,14 @@ if [[ "$server" != *"$EXPECTED_API_HOST"* ]]; then
   exit 1
 fi
 
-if ! timeout 20 oc --kubeconfig "$HUB_KUBECONFIG" get managedcluster site-a >/dev/null 2>&1; then
-  echo "ERROR: kubeconfig points at hub API but managedcluster/site-a is not visible." >&2
+if ! timeout 20 oc --kubeconfig "$HUB_KUBECONFIG" get managedcluster "$ENV_SITE_A_CLUSTER_NAME" >/dev/null 2>&1; then
+  echo "ERROR: kubeconfig points at hub API but managedcluster/$ENV_SITE_A_CLUSTER_NAME is not visible." >&2
   echo "This does not look like the RHACM hub inventory." >&2
   exit 1
 fi
 
-if ! timeout 20 oc --kubeconfig "$HUB_KUBECONFIG" get managedcluster site-b >/dev/null 2>&1; then
-  echo "ERROR: kubeconfig points at hub API but managedcluster/site-b is not visible." >&2
+if ! timeout 20 oc --kubeconfig "$HUB_KUBECONFIG" get managedcluster "$ENV_SITE_B_CLUSTER_NAME" >/dev/null 2>&1; then
+  echo "ERROR: kubeconfig points at hub API but managedcluster/$ENV_SITE_B_CLUSTER_NAME is not visible." >&2
   echo "This does not look like the RHACM hub inventory." >&2
   exit 1
 fi

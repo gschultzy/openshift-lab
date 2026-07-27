@@ -1,6 +1,6 @@
 # Day-2 hub setup and Site-A bare-metal cluster
 
-This repo is preconfigured for the next Day-2 sequence after the `lab-sno` cluster is installed.
+This repo is preconfigured for the next Day-2 sequence after the `{{ cluster_name }}` cluster is installed.
 
 ## What this config does
 
@@ -12,9 +12,9 @@ This repo is preconfigured for the next Day-2 sequence after the `lab-sno` clust
 6. Configures Assisted Service storage to use the LVM default StorageClass.
 7. Enables or validates bare-metal provisioning services.
 8. Adds only these three Dell iDRAC nodes to ACM:
-   - `b10-30`
-   - `b10-31`
-   - `b10-33`
+   - `{{ bm_nodes[0].name }}`
+   - `{{ bm_nodes[1].name }}`
+   - `{{ bm_nodes[2].name }}`
 9. Provisions the bare-metal OpenShift cluster as `site-a` / display name `Site-A`.
 
 ## Run the full Day-2 flow
@@ -64,15 +64,15 @@ bm_control_plane_count: 3
 bm_worker_count: 0
 ```
 
-Only `b10-30`, `b10-31`, and `b10-33` are enabled. The other Dell nodes are left in the inventory but disabled.
+Only `{{ bm_nodes[0].name }}`, `{{ bm_nodes[1].name }}`, and `{{ bm_nodes[2].name }}` are enabled. The other Dell nodes are left in the inventory but disabled.
 
 ## Check the hub storage
 
 ```bash
-export KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 oc get storageclass
 oc -n openshift-storage get lvmcluster lvmcluster -o yaml
-oc debug node/lab-sno-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+oc debug node/{{ cluster_name }}-0 -- chroot /host lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
 ```
 
 If the second disk is not `/dev/sdb`, change `lvm_device_paths` in `inventories/env/group_vars/all/main.yml` and rerun `05_install_lvm_storage.yml`.
@@ -98,7 +98,7 @@ then the node successfully booted the Assisted Installer image, but it cannot do
 rootfs from the hub route:
 
 ```text
-https://assisted-image-service-multicluster-engine.apps.lab-sno.poc.local/boot-artifacts/rootfs?arch=x86_64&version=4.21
+https://assisted-image-service-multicluster-engine.apps.{{ cluster_name }}.{{ base_domain }}/boot-artifacts/rootfs?arch=x86_64&version=4.22
 ```
 
 Run the validation playbook before rebooting the bare-metal nodes:
@@ -111,7 +111,7 @@ ansible-playbook -i inventories/env/hosts.yml playbooks/07_validate_assisted_ima
 The important check is that the DNS server used by the bare-metal nodes resolves the hub wildcard apps route to the SNO IP:
 
 ```text
-assisted-image-service-multicluster-engine.apps.lab-sno.poc.local -> 10.23.74.90
+assisted-image-service-multicluster-engine.apps.{{ cluster_name }}.{{ base_domain }} -> {{ sno_node.ip }}
 ```
 
 After the route and DNS pass, reboot the stuck nodes:

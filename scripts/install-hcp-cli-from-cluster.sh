@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$ROOT_DIR/scripts/lib/inventory-env.sh"
+
 if [ "$#" -lt 2 ]; then
   echo "Usage: $0 <primary-kubeconfig> <destination-hcp-path> [fallback-kubeconfig ...]" >&2
   exit 2
@@ -179,7 +184,7 @@ for kc in "${KUBECONFIGS[@]}"; do
 done
 
 echo "Failed to install hcp CLI from ConsoleCLIDownload." >&2
-echo "In this lab that usually means the spoke route hcp-cli-download-multicluster-engine.apps.<site>.poc.local is returning 503." >&2
+echo "In this lab that usually means the spoke route hcp-cli-download-multicluster-engine.apps.<site>.<base_domain from main.yml> is returning 503." >&2
 echo "The repo now tries the hub kubeconfig first, then the site kubeconfig, but no valid hcp archive was found." >&2
 echo "Manual workaround: download hcp from the hub OpenShift Console -> Help -> Command Line Tools, place it at: $DEST, then rerun the playbook." >&2
 exit 2

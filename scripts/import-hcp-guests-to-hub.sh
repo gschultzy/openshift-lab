@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.."
 source scripts/lib/hcp-tenants.sh
 
 ROOT_DIR="$PWD"
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}"
-HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ROOT_DIR/build/lab-sno/hcp-kubeconfigs}"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
+HCP_KUBECONFIG_OUT_DIR="${HCP_KUBECONFIG_OUT_DIR:-$ENV_HCP_KUBECONFIG_DIR}"
 HCP_IMPORT_AUTO_EXPORT="${HCP_IMPORT_AUTO_EXPORT:-true}"
 HCP_IMPORT_SKIP_NOT_READY="${HCP_IMPORT_SKIP_NOT_READY:-true}"
 HCP_IMPORT_WAIT="${HCP_IMPORT_WAIT:-true}"
@@ -559,8 +559,8 @@ hub_server="$(hub_oc whoami --show-server 2>/dev/null || true)"
 echo "Hub kubeconfig: $HUB_KUBECONFIG"
 echo "Hub API       : $hub_server"
 
-if [[ "$hub_server" != *"api.lab-sno.poc.local"* && "${SKIP_HUB_CONTEXT_CHECK:-false}" != "true" ]]; then
-  echo "ERROR: HUB_KUBECONFIG does not look like the lab-sno API. Refusing to import against the wrong cluster." >&2
+if [[ "$hub_server" != *"$ENV_HUB_API_HOST"* && "${SKIP_HUB_CONTEXT_CHECK:-false}" != "true" ]]; then
+  echo "ERROR: HUB_KUBECONFIG does not point to the configured hub API. Refusing to import against the wrong cluster." >&2
   echo "Set SKIP_HUB_CONTEXT_CHECK=true only if you know this is intentional." >&2
   exit 1
 fi

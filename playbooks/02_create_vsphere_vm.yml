@@ -446,7 +446,7 @@
         msg:
           - "Standard create: {{ auto_create_portgroup_result.stdout_lines | default([]) }}"
           - "Distributed create: {{ auto_create_dvs_portgroup_result.stdout_lines | default([]) }}"
-          - "If distributed create failed, check sno_primary_dvs_name. Discovery showed a DSwitch uplink object, so DSwitch is the likely value."
+          - "If distributed creation failed, set sno_primary_dvs_name to the exact distributed switch name returned by discovery."
       when:
         - (auto_create_portgroup_result is defined) or (auto_create_dvs_portgroup_result is defined)
         - not (esxi_upload_no_log | default(false) | bool)
@@ -501,7 +501,7 @@
           - vm_network_eth0 in vsphere_networks_in_dc
         fail_msg: >-
           The configured datastore or primary port group does not exist in datacenter {{ vsphere_datacenter }}.
-          Available datastores: {{ vsphere_datastores_in_dc }}. Available networks: {{ vsphere_networks_in_dc }}. Either set vm_network_eth0 to a listed network such as MGMT, or set sno_primary_portgroup_auto_create=true and ensure esxi_vswitch_name/sno_primary_dvs_name is correct.
+          Available datastores: {{ vsphere_datastores_in_dc }}. Available networks: {{ vsphere_networks_in_dc }}. Set vm_network_eth0 to an exact listed network, or enable sno_primary_portgroup_auto_create and verify esxi_vswitch_name/sno_primary_dvs_name.
           For this SNO hub, vm_network_eth1 is not required.
 
     - name: Validate optional secondary vSphere port group before VM creation

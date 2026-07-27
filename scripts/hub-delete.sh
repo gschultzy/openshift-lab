@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/lib/inventory-env.sh
+source scripts/lib/inventory-env.sh
+
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck source=/dev/null
   source .venv/bin/activate
@@ -15,7 +18,7 @@ if [[ "${CONFIRM_DELETE_HUB:-false}" != "true" ]]; then
   cat >&2 <<MSG
 Refusing to delete the hub without confirmation.
 
-This deletes the vSphere VM named by sno_vm_name and removes build/lab-sno.
+This deletes the vSphere VM named by sno_vm_name and removes the configured build_root.
 It does not clean Site-A/Site-B bare-metal hosts or Pure volumes.
 
 Run again with:
@@ -24,7 +27,7 @@ MSG
   exit 1
 fi
 
-INV="inventories/env/hosts.yml"
+INV="${INV:-$ENV_INVENTORY_FILE}"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
@@ -44,7 +47,7 @@ fi
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/04_delete_sno_hub_vm.yml \
   -e confirm_delete_hub=true
 
-rm -rf build/lab-sno
+rm -rf "$ENV_BUILD_ROOT"
 
 echo
 cat <<MSG

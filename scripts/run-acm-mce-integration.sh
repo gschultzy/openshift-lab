@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/lib/inventory-env.sh
+source scripts/lib/inventory-env.sh
+
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck source=/dev/null
   source .venv/bin/activate
@@ -11,7 +14,7 @@ else
   exit 1
 fi
 
-INV="inventories/env/hosts.yml"
+INV="${INV:-$ENV_INVENTORY_FILE}"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
@@ -28,7 +31,7 @@ else
   VAULT_ARGS=(--vault-password-file "$VAULT_PASSWORD_FILE_TMP")
 fi
 
-export KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+export KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml
 

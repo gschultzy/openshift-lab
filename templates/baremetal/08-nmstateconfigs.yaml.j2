@@ -58,7 +58,7 @@ spec:
 {% endfor %}
     routes:
       config:
-        - destination: 0.0.0.0/0
+        - destination: {{ default_ipv4_route_cidr }}
           next-hop-address: {{ bm_gateway }}
           next-hop-interface: {{ node.primary_interface }}
           table-id: 254

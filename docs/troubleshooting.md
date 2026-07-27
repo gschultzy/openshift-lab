@@ -12,7 +12,7 @@ Many policy and HCP scripts must run against the hub API, not Site-A or Site-B.
 cd ~/OCP/ocp-sno-vsphere-ansible
 source .venv/bin/activate
 
-export HUB_KUBECONFIG=$PWD/build/lab-sno/install/auth/kubeconfig
+export HUB_KUBECONFIG=$PWD/build/{{ cluster_name }}/install/auth/kubeconfig
 export KUBECONFIG=$HUB_KUBECONFIG
 
 oc whoami --show-server
@@ -22,7 +22,7 @@ oc get managedcluster -o wide
 The server must be:
 
 ```text
-https://api.lab-sno.poc.local:6443
+https://api.{{ cluster_name }}.{{ base_domain }}:6443
 ```
 
 Repair the hub kubeconfig if it points at Site-A or Site-B:
@@ -136,7 +136,7 @@ ansible-playbook -i inventories/env/hosts.yml playbooks/09_wait_site_b_baremetal
 Disable StorageCluster enforcement while cleaning Pure or rebuilding nodes:
 
 ```bash
-HUB=build/lab-sno/install/auth/kubeconfig
+HUB=build/{{ cluster_name }}/install/auth/kubeconfig
 
 oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
   --type=merge \
@@ -196,7 +196,7 @@ This usually means old Pure cloud-drive / DriveSet volumes from a previous Portw
 First disable the StorageCluster policy:
 
 ```bash
-HUB=build/lab-sno/install/auth/kubeconfig
+HUB=build/{{ cluster_name }}/install/auth/kubeconfig
 oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy portworx-flasharray-storagecluster \
   --type=merge \
   -p '{"spec":{"disabled":true}}'
@@ -230,7 +230,7 @@ Watch Portworx:
 ```bash
 watch -n 10 '
 for site in site-a site-b; do
-  K=build/lab-sno/${site}/auth/kubeconfig
+  K=build/{{ cluster_name }}/${site}/auth/kubeconfig
   echo
   echo "### $site"
   oc --kubeconfig "$K" -n portworx get storagecluster px-cluster-flasharray 2>/dev/null || true
@@ -255,7 +255,7 @@ Delete Portworx runtime objects first, then force-unmount host paths with `nsent
 
 ```bash
 for site in site-a site-b; do
-  K="build/lab-sno/${site}/auth/kubeconfig"
+  K="build/{{ cluster_name }}/${site}/auth/kubeconfig"
 
   oc --kubeconfig "$K" -n portworx delete storagecluster px-cluster-flasharray --ignore-not-found --wait=false
   oc --kubeconfig "$K" -n portworx delete pod --all --ignore-not-found --wait=false
@@ -297,15 +297,15 @@ HCP_FORCE_CLEANUP=true ./scripts/hcp-delete.sh
 Check host-side resources:
 
 ```bash
-oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
-oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
+oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
+oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig -n clusters get hostedcluster,nodepool,pvc,pod
 ```
 
 Check hub imports:
 
 ```bash
-oc --kubeconfig build/lab-sno/install/auth/kubeconfig get managedcluster
-oc --kubeconfig build/lab-sno/install/auth/kubeconfig get ns | egrep 'site-a-hcp-t1-px|site-b-hcp-t1-px'
+oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig get managedcluster
+oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig get ns | egrep 'site-a-hcp-t1-px|site-b-hcp-t1-px'
 ```
 
 ---
@@ -315,15 +315,15 @@ oc --kubeconfig build/lab-sno/install/auth/kubeconfig get ns | egrep 'site-a-hcp
 Exported guest kubeconfigs live here:
 
 ```text
-build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
-build/lab-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
+build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig
+build/{{ cluster_name }}/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig
 ```
 
 Example checks:
 
 ```bash
-oc --kubeconfig build/lab-sno/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig get nodes
-oc --kubeconfig build/lab-sno/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig get clusterversion
+oc --kubeconfig build/{{ cluster_name }}/hcp-kubeconfigs/site-a-hcp-t1-px.kubeconfig get nodes
+oc --kubeconfig build/{{ cluster_name }}/hcp-kubeconfigs/site-b-hcp-t1-px.kubeconfig get clusterversion
 ```
 
 ---

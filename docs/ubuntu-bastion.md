@@ -1,13 +1,13 @@
 # Ubuntu 24.04.4 LTS bastion requirements
 
-This repo assumes the automation runs from the Ubuntu bastion VM, `RedHat-VM01`, at `10.23.74.12`.
+This repo assumes the automation runs from the Ubuntu bastion VM, `{{ bastion_hostname }}`, at `{{ bastion_ip }}`.
 
 The Ubuntu bastion is the Ansible control node. It needs network reachability to:
 
-- vCenter: `10.23.74.10`
-- ESXi host through vCenter inventory: `10.23.74.11`
-- AD DNS server, if DNS automation is used: `10.23.74.100`
-- iDRAC/BMC addresses: `10.23.74.81-85`
+- vCenter: `{{ vcenter_hostname }}`
+- ESXi host through vCenter inventory: `{{ vsphere_esxi_hostname }}`
+- AD DNS server, if DNS automation is used: `{{ ad_dns_server }}`
+- iDRAC/BMC addresses: `{{ BMC addresses from bm_nodes/site_b_nodes }}`
 - OpenShift hub/spoke API and ingress VIPs
 - Red Hat and OpenShift image registries, unless this is later converted to a disconnected workflow
 
@@ -67,16 +67,16 @@ Expected key Python packages:
 
 The `oc`, `kubectl`, and `openshift-install` binaries must be in `PATH`.
 
-The bootstrap script downloads them from the OpenShift client mirror:
+The bootstrap script downloads the inventory-matched OpenShift 4.22.7 binaries from the OpenShift client mirror:
 
 ```bash
-OPENSHIFT_VERSION=stable-4.21 ./scripts/bootstrap-ubuntu-24.04.sh
+./scripts/bootstrap-ubuntu-24.04.sh
 ```
 
-You can pin a specific payload client version instead:
+To intentionally follow the moving 4.22 stable stream instead:
 
 ```bash
-OPENSHIFT_VERSION=4.21.0 ./scripts/bootstrap-ubuntu-24.04.sh
+OPENSHIFT_VERSION=stable-4.22 ./scripts/bootstrap-ubuntu-24.04.sh
 ```
 
 Validate afterwards:
@@ -109,7 +109,7 @@ ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-v
 
 - Keep `inventories/env/group_vars/all/vault.yml` encrypted with Ansible Vault.
 - Do not commit `.venv/`, generated ISOs, kubeconfigs, pull secrets, or the `build/` directory.
-- If the Ubuntu VM uses a proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` before running the bootstrap and playbooks. Include `10.23.74.0/24`, `.poc.local`, vCenter, iDRACs, and the OpenShift API VIPs in `NO_PROXY`.
+- If the Ubuntu VM uses a proxy, export `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` before running the bootstrap and playbooks. Include `{{ machine_cidr }}`, `.{{ base_domain }}`, vCenter, iDRACs, and the OpenShift API VIPs in `NO_PROXY`.
 
 
 ## Ansible callback compatibility

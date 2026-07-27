@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.."
 source scripts/lib/hcp-tenants.sh
 
 ROOT_DIR="$PWD"
-SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig}"
-SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig}"
+SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ENV_SITE_A_KUBECONFIG}"
+SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ENV_SITE_B_KUBECONFIG}"
 HCP_NAMESPACE="${HCP_NAMESPACE:-clusters}"
 HCP_STORAGE_CLASS="${HCP_STORAGE_CLASS:-hcp-pxe-boot}"
 

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/lib/hcp-tenants.sh
 source scripts/lib/hcp-tenants.sh
 
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 export HCP_NAMESPACE="${HCP_NAMESPACE:-clusters}"
 # This is a lab lifecycle wrapper; make delete remove stale import namespaces if RHACM leaves them Terminating.
 export HCP_FORCE_CLEANUP="${HCP_FORCE_CLEANUP:-true}"

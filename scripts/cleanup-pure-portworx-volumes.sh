@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$ROOT_DIR/scripts/lib/inventory-env.sh"
+
 # Delete old Portworx Pure FlashArray volumes for a lab rebuild.
 # Targets only volumes whose names match:
 #   pxclouddrive-*
 #   px_*pvc-*
 #
-# Defaults match the POD22 lab. Override with:
-#   PURE_ARRAY=pureuser@10.23.74.50 ./scripts/cleanup-pure-portworx-volumes.sh
-# or:
-#   PURE_ARRAY_USER=pureuser PURE_ARRAY_HOST=10.23.74.50 ./scripts/cleanup-pure-portworx-volumes.sh
+# Defaults are loaded from pure_flasharray_mgmt_endpoint and
+# pure_flasharray_username in main.yml. Override with PURE_ARRAY or the
+# PURE_ARRAY_USER / PURE_ARRAY_HOST environment variables when required.
 #
 # The script opens one SSH ControlMaster connection so the Pure password is entered once.
 
-PURE_ARRAY_HOST="${PURE_ARRAY_HOST:-10.23.74.50}"
-PURE_ARRAY_USER="${PURE_ARRAY_USER:-pureuser}"
+PURE_ARRAY_HOST="${PURE_ARRAY_HOST:-$(inventory_value pure_flasharray_mgmt_endpoint)}"
+PURE_ARRAY_USER="${PURE_ARRAY_USER:-$(inventory_value pure_flasharray_username)}"
 ARRAY="${PURE_ARRAY:-${PURE_ARRAY_USER}@${PURE_ARRAY_HOST}}"
 WORKDIR="${WORKDIR:-/tmp/pure-portworx-volume-cleanup}"
 CONFIRM_TOKEN="DELETE_PORTWORX_FLASHARRAY_VOLUMES"

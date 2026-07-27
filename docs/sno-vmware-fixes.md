@@ -13,11 +13,11 @@ sno_node:
   mac_eth1: ""
   secondary_interface: ""
 
-vm_network_eth0: MGMT
+vm_network_eth0: "{{ discovered_port_group_name }}"
 vm_network_eth1: ""
 ```
 
-Do not attach VLAN574 to the SNO hub. VLAN574 can be used later for other lab hosts or workloads, but the hub itself only needs the VLAN3574 machine network.
+Do not attach VLAN {{ secondary_vlan_id }} to the SNO hub. VLAN {{ secondary_vlan_id }} can be used later for other lab hosts or workloads, but the hub itself only needs the {{ vm_network_eth0 }} machine network.
 
 ## vSphere disk UUID
 
@@ -34,7 +34,7 @@ This is done with `scripts/set-vm-advanced-setting.py` through pyVmomi after the
 If an earlier Agent ISO was generated with two NICs, remove the old build state and regenerate:
 
 ```bash
-rm -rf build/lab-sno
+rm -rf build/{{ cluster_name }}
 ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
 ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ```
@@ -49,24 +49,24 @@ Then run `02_create_vsphere_vm.yml`. Set the value back to `false` afterwards.
 
 ## Port group creation on distributed switches
 
-If vCenter discovery shows only `MGMT` and a distributed switch uplink object such as
-`DSwitch-DVUplinks-18`, the ESXi host is probably using a vSphere Distributed Switch
+If vCenter discovery shows only the port group selected by `vm_network_eth0` and a distributed switch uplink object such as
+`{{ discovered vSphere uplink }}`, the ESXi host is probably using a vSphere Distributed Switch
 rather than a standard `vSwitch0`. In that case, keep:
 
 ```yaml
-vm_network_eth0: MGMT
+vm_network_eth0: "{{ discovered_port_group_name }}"
 vm_network_eth1: ""
 sno_primary_portgroup_auto_create: false
 sno_primary_portgroup_create_mode: auto
-sno_primary_dvs_name: DSwitch
+sno_primary_dvs_name: "{{ discovered_dvs_name }}"
 sno_primary_portgroup_vlan_id: 0
 ```
 
-Use VLAN ID `0` when the ESXi physical uplink is on an access switchport for VLAN 3574.
-Use VLAN ID `3574` only when the uplink is trunking tagged VLAN 3574.
+Use VLAN ID `0` when the ESXi physical uplink is on an access switchport for VLAN {{ machine_vlan_id }}.
+Use VLAN ID `3574` only when the uplink is trunking tagged VLAN {{ machine_vlan_id }}.
 
 The VM creation playbook will first try a standard vSwitch. If `vSwitch0` is not present,
-it will create the `VLAN3574` distributed port group on the configured DVS through vCenter.
+it will create the `{{ vm_network_eth0 }}` distributed port group on the configured DVS through vCenter.
 
 
 ## Second 800 GB disk

@@ -16,7 +16,7 @@ spec:
   online: true
   bootMACAddress: {{ node.boot_mac }}
   bmc:
-    address: {{ node.bmc_address }}
+    address: redfish-virtualmedia://{{ node.bmc_ip }}{{ idrac_redfish_system_path }}
     credentialsName: {{ node.name }}-bmc-secret
     disableCertificateVerification: true
 {% if node.root_device_hint is defined and node.root_device_hint | length > 0 %}

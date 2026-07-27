@@ -4,10 +4,10 @@ set -euo pipefail
 # Bootstrap the Ansible bastion for this repo on Ubuntu 24.04.x LTS.
 # Usage:
 #   ./scripts/bootstrap-ubuntu-24.04.sh
-#   OPENSHIFT_VERSION=4.21.0 ./scripts/bootstrap-ubuntu-24.04.sh
-#   OPENSHIFT_VERSION=stable-4.21 ./scripts/bootstrap-ubuntu-24.04.sh
+#   OPENSHIFT_VERSION=4.22.7 ./scripts/bootstrap-ubuntu-24.04.sh
+#   OPENSHIFT_VERSION=stable-4.22 ./scripts/bootstrap-ubuntu-24.04.sh
 
-OPENSHIFT_VERSION="${OPENSHIFT_VERSION:-stable-4.21}"
+OPENSHIFT_VERSION="${OPENSHIFT_VERSION:-4.22.7}"
 INSTALL_BIN_DIR="${INSTALL_BIN_DIR:-/usr/local/bin}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

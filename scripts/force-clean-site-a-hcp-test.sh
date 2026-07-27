@@ -3,10 +3,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-$PWD/build/lab-sno/install/auth/kubeconfig}"
-SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$PWD/build/lab-sno/site-a/auth/kubeconfig}"
-HCP_NAME="${SITE_A_HCP_NAME:-site-a-hcp-t1-px}"
-HCP_NS="${SITE_A_HCP_NAMESPACE:-clusters}"
+# shellcheck source=scripts/lib/hcp-tenants.sh
+source scripts/lib/hcp-tenants.sh
+
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
+SITEA_KUBECONFIG="${SITEA_KUBECONFIG:-$ENV_SITE_A_KUBECONFIG}"
+HCP_NAME="${SITE_A_HCP_NAME:-$(hcp_tenants_for_site "$ENV_SITE_A_CLUSTER_NAME" | head -n1 | cut -d'|' -f2)}"
+HCP_NS="${SITE_A_HCP_NAMESPACE:-$ENV_HCP_NAMESPACE}"
 IMPORT_NAME="${SITE_A_HCP_IMPORT_NAME:-${HCP_NAME}}"
 HCP_HOSTING_NS="clusters-${HCP_NAME}"
 KLUSTERLET_NS="klusterlet-${IMPORT_NAME}"
@@ -34,13 +37,13 @@ echo "Site-A API: $SITEA_SERVER"
 echo "HCP:        $HCP_NS/$HCP_NAME"
 echo
 
-if [[ "$HUB_SERVER" != *"lab-sno"* ]]; then
-  echo "Refusing to continue: HUB_KUBECONFIG does not look like lab-sno." >&2
+if [[ "$HUB_SERVER" != *"$ENV_HUB_API_HOST"* ]]; then
+  echo "Refusing to continue: HUB_KUBECONFIG does not point to the configured hub." >&2
   exit 1
 fi
 
-if [[ "$SITEA_SERVER" != *"site-a"* ]]; then
-  echo "Refusing to continue: SITEA_KUBECONFIG does not look like site-a." >&2
+if [[ "$SITEA_SERVER" != *"$ENV_SITE_A_CLUSTER_NAME"* ]]; then
+  echo "Refusing to continue: SITEA_KUBECONFIG does not point to the configured Site-A cluster." >&2
   exit 1
 fi
 
@@ -159,7 +162,7 @@ echo
 echo "# 6) Current status"
 oc --kubeconfig "$SITEA_KUBECONFIG" -n "$HCP_NS" get hostedcluster,nodepool "$HCP_NAME" --ignore-not-found || true
 oc --kubeconfig "$SITEA_KUBECONFIG" get ns | egrep "^(${HCP_HOSTING_NS}|${KLUSTERLET_NS}|multicluster-engine|open-cluster-management-hub)\\b" || true
-oc --kubeconfig "$HUB_KUBECONFIG" get managedcluster | egrep "$IMPORT_NAME|site-b-hcp-t1-px|site-a-hcp-t1-px|site-a\b|site-b\b|local-cluster" || true
+oc --kubeconfig "$HUB_KUBECONFIG" get managedcluster | egrep "$IMPORT_NAME|$ENV_SITE_A_CLUSTER_NAME|$ENV_SITE_B_CLUSTER_NAME|local-cluster" || true
 
 echo
 

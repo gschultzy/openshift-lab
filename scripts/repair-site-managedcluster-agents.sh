@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HUB_KUBECONFIG="${HUB_KUBECONFIG:-${KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}}"
+# shellcheck source=scripts/lib/inventory-env.sh
+source "$ROOT_DIR/scripts/lib/inventory-env.sh"
+HUB_KUBECONFIG="${HUB_KUBECONFIG:-${KUBECONFIG:-$ENV_HUB_KUBECONFIG}}"
 
 if [[ ! -f "$HUB_KUBECONFIG" ]]; then
   echo "ERROR: hub kubeconfig not found: $HUB_KUBECONFIG" >&2
@@ -13,8 +15,8 @@ HUB_SERVER="$(oc --kubeconfig "$HUB_KUBECONFIG" whoami --show-server 2>/dev/null
 echo "Using hub kubeconfig: $HUB_KUBECONFIG"
 echo "Hub API server: $HUB_SERVER"
 
-if [[ "$HUB_SERVER" != *"api.lab-sno."* && "$HUB_SERVER" != *"lab-sno"* ]]; then
-  echo "ERROR: this kubeconfig does not point at lab-sno. Do not continue." >&2
+if [[ "$HUB_SERVER" != *"$ENV_HUB_API_HOST"* ]]; then
+  echo "ERROR: this kubeconfig does not point at the configured hub. Do not continue." >&2
   echo "Current server is: $HUB_SERVER" >&2
   exit 1
 fi
@@ -130,8 +132,8 @@ YAML
   oc --kubeconfig "$HUB_KUBECONFIG" -n "$cluster" get managedclusteraddon || true
 }
 
-repair_cluster site-a "$ROOT_DIR/build/lab-sno/site-a/auth/kubeconfig"
-repair_cluster site-b "$ROOT_DIR/build/lab-sno/site-b/auth/kubeconfig"
+repair_cluster site-a "$ENV_SITE_A_KUBECONFIG"
+repair_cluster site-b "$ENV_SITE_B_KUBECONFIG"
 
 echo
 echo "================================================================================"
@@ -153,6 +155,6 @@ echo "Repair was applied, but one or both clusters are still not Available=True.
 echo "Run these for details:"
 echo "  oc -n site-a describe managedclusteraddon work-manager"
 echo "  oc -n site-b describe managedclusteraddon work-manager"
-echo "  oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig -n open-cluster-management-agent get pods -o wide"
-echo "  oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig -n open-cluster-management-agent get pods -o wide"
+echo "  oc --kubeconfig $ENV_SITE_A_KUBECONFIG -n open-cluster-management-agent get pods -o wide"
+echo "  oc --kubeconfig $ENV_SITE_B_KUBECONFIG -n open-cluster-management-agent get pods -o wide"
 exit 2

@@ -145,7 +145,7 @@ def find_default_gateway(state: Dict[str, Any], iface: str) -> Optional[str]:
     for route in (state.get("routes") or {}).get("config") or []:
         if not isinstance(route, dict):
             continue
-        if route.get("destination") in ("0.0.0.0/0", "default") and route.get("next-hop-interface") == iface:
+        if route.get("destination") in (str(ipaddress.IPv4Network(0)), "default") and route.get("next-hop-interface") == iface:
             return route.get("next-hop-address")
     return None
 

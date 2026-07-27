@@ -7,7 +7,7 @@
       ansible.builtin.assert:
         that:
           - item.boot_mac is not search('CHANGE_ME')
-        fail_msg: "{{ item.name }} still has a placeholder boot_mac. Run playbooks/05_discover_idrac_nics.yml to discover the real NIC MAC cabled to VLAN 3574."
+        fail_msg: "{{ item.name }} still has a placeholder boot_mac. Run playbooks/05_discover_idrac_nics.yml to discover the real NIC MAC cabled to VLAN {{ machine_vlan_id }}."
       loop: "{{ bm_nodes }}"
       when: item.enabled | default(true)
 

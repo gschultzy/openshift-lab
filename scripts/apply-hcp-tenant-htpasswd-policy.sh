@@ -14,7 +14,7 @@ fi
 # shellcheck source=scripts/lib/hcp-tenants.sh
 source scripts/lib/hcp-tenants.sh
 
-INV="inventories/env/hosts.yml"
+INV="${INV:-$ENV_INVENTORY_FILE}"
 ROOT_DIR="$PWD"
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
@@ -32,33 +32,41 @@ else
   VAULT_ARGS=(--vault-password-file "$VAULT_PASSWORD_FILE_TMP")
 fi
 
-export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ROOT_DIR/build/lab-sno/install/auth/kubeconfig}"
+export HUB_KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 export KUBECONFIG="$HUB_KUBECONFIG"
 
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/28_apply_hcp_tenant_htpasswd_policy.yml
 
-cat <<'EOM'
+TENANT_USER="$(inventory_value hcp_tenant_admin_username)"
+TENANT_PASSWORD_NOTE="$(inventory_value hcp_tenant_admin_password_note)"
+TENANT_POLICY_NAMESPACE="$(inventory_value hcp_tenant_policy_namespace)"
+HCP_NAMESPACE="$(inventory_value site_a_hcp_namespace)"
+
+cat <<EOM
 
 HCP tenant HTPasswd OAuth policy has been applied from the hub to the hosting clusters.
 
 Tenant login:
-  username: admin
-  password: pureuser
+  username: $TENANT_USER
+  password: $TENANT_PASSWORD_NOTE
 
 Check policy status:
-  oc --kubeconfig build/lab-sno/install/auth/kubeconfig -n hcp-tenant-auth-policies get policy,placement,placementdecision,placementbinding
+  oc --kubeconfig $HUB_KUBECONFIG -n $TENANT_POLICY_NAMESPACE get policy,placement,placementdecision,placementbinding
 
 Verify HostedCluster OAuth config on the hosting clusters:
 EOM
 
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
-  case "$site" in
-    site-a) k="build/lab-sno/site-a/auth/kubeconfig" ;;
-    site-b) k="build/lab-sno/site-b/auth/kubeconfig" ;;
-    *) continue ;;
-  esac
-  printf '  oc --kubeconfig %s -n clusters get hostedcluster %s -o yaml | egrep -A12 '\''oauth:|identityProviders:|HTPasswd|fileData'\''\n' "$k" "$name"
+  if [[ "$site" == "$ENV_SITE_A_CLUSTER_NAME" ]]; then
+    k="$ENV_SITE_A_KUBECONFIG"
+  elif [[ "$site" == "$ENV_SITE_B_CLUSTER_NAME" ]]; then
+    k="$ENV_SITE_B_KUBECONFIG"
+  else
+    continue
+  fi
+  printf '  oc --kubeconfig %s -n %s get hostedcluster %s -o yaml | egrep -A12 '''oauth:|identityProviders:|HTPasswd|fileData'''
+' "$k" "$HCP_NAMESPACE" "$name"
 done < <(hcp_tenants)
 
 cat <<'EOM'
@@ -66,5 +74,6 @@ cat <<'EOM'
 Cluster-admin RBAC is not part of HostedCluster OAuth sync. To grant it after tenant APIs are reachable:
 EOM
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
-  printf '  oc --kubeconfig build/lab-sno/hcp-kubeconfigs/%s.kubeconfig adm policy add-cluster-role-to-user cluster-admin admin\n' "$name"
+  printf '  oc --kubeconfig %s/%s.kubeconfig adm policy add-cluster-role-to-user cluster-admin %s
+' "$ENV_HCP_KUBECONFIG_DIR" "$name" "$TENANT_USER"
 done < <(hcp_tenants)

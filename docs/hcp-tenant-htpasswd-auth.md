@@ -45,17 +45,17 @@ The password is stored in the policy as a bcrypt htpasswd hash.
 ## Verify
 
 ```bash
-oc --kubeconfig build/lab-sno/install/auth/kubeconfig \
+oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig \
   -n hcp-tenant-auth-policies get policy,placement,placementdecision,placementbinding
 
 for h in site-a-hcp-t1-px site-a-hcp-t2-kv; do
-  oc --kubeconfig build/lab-sno/site-a/auth/kubeconfig \
+  oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig \
     -n clusters get hostedcluster "$h" -o yaml | \
     egrep -A12 'oauth:|identityProviders:|HTPasswd|fileData'
 done
 
 for h in site-b-hcp-t1-px site-b-hcp-t2-kv; do
-  oc --kubeconfig build/lab-sno/site-b/auth/kubeconfig \
+  oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig \
     -n clusters get hostedcluster "$h" -o yaml | \
     egrep -A12 'oauth:|identityProviders:|HTPasswd|fileData'
 done
@@ -66,7 +66,7 @@ done
 The host-synced HCP configuration path covers control-plane configuration such as OAuth. A tenant `ClusterRoleBinding` is guest-cluster RBAC, not a `HostedCluster.spec.configuration` field. Apply it after tenant APIs are reachable:
 
 ```bash
-for k in build/lab-sno/hcp-kubeconfigs/*.kubeconfig; do
+for k in build/{{ cluster_name }}/hcp-kubeconfigs/*.kubeconfig; do
   oc --kubeconfig "$k" adm policy add-cluster-role-to-user cluster-admin admin
  done
 ```

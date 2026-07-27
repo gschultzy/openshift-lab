@@ -16,33 +16,14 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
-# Ask for the Ansible Vault password once, then reuse it for every playbook.
-# If ANSIBLE_VAULT_PASSWORD_FILE is already set, use that instead and do not prompt.
-if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
-  VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
-else
-  VAULT_PASSWORD_FILE_TMP="$(mktemp)"
-  chmod 600 "$VAULT_PASSWORD_FILE_TMP"
-  trap 'rm -f "$VAULT_PASSWORD_FILE_TMP"' EXIT
-
-  read -r -s -p "Vault password: " VAULT_PASSWORD
-  echo
-  printf '%s\n' "$VAULT_PASSWORD" > "$VAULT_PASSWORD_FILE_TMP"
-  unset VAULT_PASSWORD
-
-  VAULT_ARGS=(--vault-password-file "$VAULT_PASSWORD_FILE_TMP")
-fi
+# Shared Vault and validated local sudo authentication.
+# shellcheck source=scripts/lib/ansible-auth.sh
+source scripts/lib/ansible-auth.sh
+ansible_auth_init
 
 run_playbook() {
   local playbook="$1"
-  ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "$playbook"
-}
-
-truthy() {
-  case "${1:-}" in
-    true|TRUE|True|1|yes|YES|Yes|y|Y) return 0 ;;
-    *) return 1 ;;
-  esac
+  ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${BECOME_ARGS[@]}" "$playbook"
 }
 
 hub_kubeconfig_path() {
@@ -89,6 +70,7 @@ require_hub_up() {
 require_hub_up
 run_playbook playbooks/02_add_sno_extra_disk.yml
 run_playbook playbooks/05_install_lvm_storage.yml
+configure_local_become_auth
 run_playbook playbooks/04_configure_ad_dns.yml
 run_playbook playbooks/06_install_acm.yml
 run_playbook playbooks/07_configure_assisted_service.yml

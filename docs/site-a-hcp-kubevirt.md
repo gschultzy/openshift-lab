@@ -99,7 +99,7 @@ hcp create cluster kubevirt \
   --memory 8Gi \
   --cores 4 \
   --etcd-storage-class {{ detected-or-configured-storageclass }} \
-  --release-image quay.io/openshift-release-dev/ocp-release:4.22.7-x86_64
+  --release-image "quay.io/openshift-release-dev/ocp-release:${OCP_RELEASE}-x86_64"
 ```
 
 ## Watch the hosted cluster

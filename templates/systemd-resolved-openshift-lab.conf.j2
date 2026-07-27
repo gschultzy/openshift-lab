@@ -1,0 +1,7 @@
+# Managed by the OpenShift lab automation.
+# Route the environment DNS zone to the configured authoritative DNS server(s).
+[Resolve]
+DNS={{ dns_servers | join(' ') }}
+Domains={{ bastion_dns_route_domains | join(' ') }}
+Cache={{ 'yes' if bastion_dns_cache_enabled | bool else 'no' }}
+DNSStubListener={{ 'yes' if bastion_dns_stub_listener_enabled | bool else 'no' }}

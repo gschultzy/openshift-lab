@@ -4,11 +4,11 @@ set -euo pipefail
 # Bootstrap the Ansible bastion for this repo on Ubuntu 24.04.x LTS.
 # Usage:
 #   ./scripts/bootstrap-ubuntu-24.04.sh
-#   OPENSHIFT_VERSION=4.22.7 ./scripts/bootstrap-ubuntu-24.04.sh
-#   OPENSHIFT_VERSION=stable-4.22 ./scripts/bootstrap-ubuntu-24.04.sh
+#   OPENSHIFT_VERSION=x.y.z ./scripts/bootstrap-ubuntu-24.04.sh
+# The exact OpenShift release defaults to ocp_release_version in main.yml.
+# Override only with an exact x.y.z version when intentionally testing another release.
 
-OPENSHIFT_VERSION="${OPENSHIFT_VERSION:-4.22.7}"
-INSTALL_BIN_DIR="${INSTALL_BIN_DIR:-/usr/local/bin}"
+OPENSHIFT_VERSION="${OPENSHIFT_VERSION:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! grep -q '^ID=ubuntu' /etc/os-release; then
@@ -55,25 +55,21 @@ python -m pip install --upgrade pip wheel setuptools
 python -m pip install -r requirements-python.txt
 ansible-galaxy collection install -r requirements.yml
 
+if [[ -z "$OPENSHIFT_VERSION" ]]; then
+  OPENSHIFT_VERSION="$(./scripts/lib/inventory-value.py --file inventories/env/group_vars/all/main.yml ocp_release_version)"
+fi
+
 # The OpenShift Agent-based Installer calls nmstatectl locally when static
 # networking is present in agent-config.yaml. Ubuntu 24.04 images do not always
 # have a native apt nmstate package, so use the helper with a pip fallback.
 ./scripts/install-nmstatectl-ubuntu.sh
 
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "${tmpdir}"' EXIT
-
-client_url="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OPENSHIFT_VERSION}/openshift-client-linux.tar.gz"
-installer_url="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OPENSHIFT_VERSION}/openshift-install-linux.tar.gz"
-
-curl -fsSL "${client_url}" -o "${tmpdir}/openshift-client-linux.tar.gz"
-tar -xzf "${tmpdir}/openshift-client-linux.tar.gz" -C "${tmpdir}" oc kubectl
-sudo install -m 0755 "${tmpdir}/oc" "${INSTALL_BIN_DIR}/oc"
-sudo install -m 0755 "${tmpdir}/kubectl" "${INSTALL_BIN_DIR}/kubectl"
-
-curl -fsSL "${installer_url}" -o "${tmpdir}/openshift-install-linux.tar.gz"
-tar -xzf "${tmpdir}/openshift-install-linux.tar.gz" -C "${tmpdir}" openshift-install
-sudo install -m 0755 "${tmpdir}/openshift-install" "${INSTALL_BIN_DIR}/openshift-install"
+# Install the exact tools pinned by main.yml into .venv/bin. This avoids
+# depending on or overwriting system-wide OpenShift binaries.
+OPENSHIFT_VERSION="${OPENSHIFT_VERSION}" \
+INSTALL_BIN_DIR="${REPO_ROOT}/.venv/bin" \
+FORCE_SYNC_OPENSHIFT_TOOLS=true \
+  ./scripts/sync-openshift-tools.sh
 
 cat <<DONE
 
@@ -87,7 +83,10 @@ Next commands:
   ansible --version
   ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
 
-OpenShift client/installer source:
+OpenShift client/installer version:
   ${OPENSHIFT_VERSION}
+
+Repo-local binary directory:
+  ${REPO_ROOT}/.venv/bin
 
 DONE

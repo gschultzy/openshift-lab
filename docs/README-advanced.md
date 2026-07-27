@@ -137,11 +137,9 @@ cd ocp-sno-vsphere-ansible
 source .venv/bin/activate
 ```
 
-By default the script downloads the OpenShift 4.22.7 client and installer, matching the release pinned in the inventory. To intentionally follow the moving 4.22 stable stream instead, run:
-
-```bash
-OPENSHIFT_VERSION=stable-4.22 ./scripts/bootstrap-ubuntu-24.04.sh
-```
+The script reads the exact OpenShift client and installer release from
+`ocp_release_version` in `inventories/env/group_vars/all/main.yml`. Keep the
+release pin in that inventory rather than duplicating it in bootstrap commands.
 
 The bootstrap installs the Ubuntu packages, creates a Python virtual environment, installs the Python module requirements, installs the Ansible Galaxy collections, installs or wraps `nmstatectl`, and places `oc`, `kubectl`, and `openshift-install` in `/usr/local/bin`.
 
@@ -367,7 +365,7 @@ Then run:
 
 ```bash
 ansible-playbook -i inventories/env/hosts.yml playbooks/00_preflight.yml --ask-vault-pass
-ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass --ask-become-pass
 ansible-playbook -i inventories/env/hosts.yml playbooks/01_render_agent_iso.yml --ask-vault-pass
 ansible-playbook -i inventories/env/hosts.yml playbooks/02_create_vsphere_vm.yml --ask-vault-pass
 ansible-playbook -i inventories/env/hosts.yml playbooks/03_wait_install.yml --ask-vault-pass
@@ -429,7 +427,7 @@ Or run the full hub-and-spoke flow:
 If WinRM is enabled to the AD server, you can run:
 
 ```bash
-ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass --ask-become-pass
 ```
 
 If WinRM is not enabled, create these records manually in AD DNS:

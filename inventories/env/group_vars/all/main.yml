@@ -204,8 +204,17 @@ pull_secret: "{{ vault_pull_secret }}"
 ssh_pub_key: "{{ vault_ssh_public_key }}"
 
 # ---------------------------------------------------------------------------
-# AD DNS optional automation
+# SNO DNS automation
 # ---------------------------------------------------------------------------
+# DNS is a hard prerequisite for an Agent-based SNO installation. run.sh calls
+# playbooks/04_configure_ad_dns.yml before rendering or booting the Agent ISO.
+# The playbook creates the AD DNS records, routes the lab domain to the AD DNS
+# server through systemd-resolved on the Ubuntu bastion, and verifies both direct
+# DNS-server responses and normal libc/system resolver responses.
+sno_dns_automation_enabled: true
+sno_dns_manage_ad_records: true
+sno_dns_configure_bastion_resolver: true
+
 ad_dns_connection: winrm
 ad_dns_winrm_transport: ntlm
 ad_dns_port: 5985
@@ -224,6 +233,31 @@ ad_dns_records:
   - name: "{{ sno_node.hostname }}.{{ cluster_name }}"
     type: A
     value: "{{ sno_node.ip }}"
+
+# Persistent systemd-resolved routing on the Ubuntu bastion. The route-only
+# domain keeps public DNS on the existing upstream resolver while ensuring that
+# every query below base_domain is sent to dns_servers.
+bastion_dns_resolved_dropin_dir: /etc/systemd/resolved.conf.d
+bastion_dns_resolved_dropin_file: "{{ bastion_dns_resolved_dropin_dir }}/openshift-lab.conf"
+bastion_dns_route_domains:
+  - "~{{ base_domain }}"
+bastion_dns_cache_enabled: true
+bastion_dns_stub_listener_enabled: true
+bastion_dns_validation_retries: 12
+bastion_dns_validation_delay_seconds: 5
+bastion_dns_query_timeout_seconds: 3
+bastion_dns_query_attempts: 2
+
+# Use a concrete apps name to validate the wildcard record.
+sno_dns_validation_records:
+  - name: "{{ hub_api_hostname }}"
+    expected_ip: "{{ sno_api_ip }}"
+  - name: "api-int.{{ cluster_fqdn }}"
+    expected_ip: "{{ sno_api_ip }}"
+  - name: "dns-probe.apps.{{ cluster_fqdn }}"
+    expected_ip: "{{ sno_ingress_ip }}"
+  - name: "{{ sno_node.fqdn }}"
+    expected_ip: "{{ sno_node.ip }}"
 
 # ---------------------------------------------------------------------------
 # LVM Storage on the SNO hub

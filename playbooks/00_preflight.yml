@@ -158,48 +158,76 @@
       loop:
         - ansible-playbook
         - curl
+        - dig
+        - getent
         - git
         - jq
         - kubectl
         - oc
         - openshift-install
         - python3
+        - resolvectl
         - sshpass
+        - sudo
+        - systemctl
         - tar
         - nmstatectl
 
-    - name: Read installed OpenShift installer version
-      ansible.builtin.command: openshift-install version
+    - name: Resolve OpenShift tool paths and exact versions
+      ansible.builtin.shell: |
+        set -o pipefail
+        binary_path="$(command -v {{ item.command }})"
+        version="$({{ item.version_command }} 2>&1 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+        printf '%s|%s\n' "$binary_path" "$version"
+      args:
+        executable: /bin/bash
       environment:
         PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
       changed_when: false
-      register: openshift_installer_version
+      register: openshift_tool_details
+      loop:
+        - command: oc
+          version_command: oc version --client
+        - command: kubectl
+          version_command: kubectl version --client
+        - command: openshift-install
+          version_command: openshift-install version
+      loop_control:
+        label: "{{ item.command }}"
 
-    - name: Read installed OpenShift client version
-      ansible.builtin.command: oc version --client
-      environment:
-        PATH: "{{ playbook_dir }}/../.venv/bin:{{ ansible_env.PATH }}:/usr/local/sbin:/usr/sbin:/sbin"
-      changed_when: false
-      register: openshift_client_version
+    - name: Store resolved OpenShift tool details
+      ansible.builtin.set_fact:
+        oc_binary_path: "{{ openshift_tool_details.results[0].stdout.split('|')[0] }}"
+        oc_binary_version: "{{ openshift_tool_details.results[0].stdout.split('|')[1] }}"
+        kubectl_binary_path: "{{ openshift_tool_details.results[1].stdout.split('|')[0] }}"
+        kubectl_binary_version: "{{ openshift_tool_details.results[1].stdout.split('|')[1] }}"
+        openshift_installer_binary_path: "{{ openshift_tool_details.results[2].stdout.split('|')[0] }}"
+        openshift_installer_binary_version: "{{ openshift_tool_details.results[2].stdout.split('|')[1] }}"
 
-    - name: Validate the pinned OpenShift release and installed tools match
-      ansible.builtin.assert:
-        that:
-          - "ocp_release_version is match('^' ~ (ocp_version | regex_escape) ~ '\\.[0-9]+$')"
-          - "ocp_release_version in openshift_installer_version.stdout"
-          - "ocp_release_version in openshift_client_version.stdout"
-        fail_msg: >-
-          The inventory pins OpenShift {{ ocp_release_version }}, but the installed
-          oc and/or openshift-install binary does not match. Run
-          OPENSHIFT_VERSION={{ ocp_release_version }} ./scripts/bootstrap-ubuntu-24.04.sh
-          and then rerun preflight.
-
-    - name: Show validated OpenShift tool versions
+    - name: Show detected OpenShift tool paths and versions
       ansible.builtin.debug:
         msg:
           - "Pinned release: {{ ocp_release_version }}"
-          - "openshift-install: {{ openshift_installer_version.stdout_lines | first }}"
-          - "oc client: {{ openshift_client_version.stdout_lines | first }}"
+          - "oc: {{ oc_binary_path }} ({{ oc_binary_version | default('unknown', true) }})"
+          - "kubectl: {{ kubectl_binary_path }} ({{ kubectl_binary_version | default('unknown', true) }})"
+          - "openshift-install: {{ openshift_installer_binary_path }} ({{ openshift_installer_binary_version | default('unknown', true) }})"
+
+    - name: Validate the pinned OpenShift release and repo-local tools match
+      ansible.builtin.assert:
+        that:
+          - "ocp_release_version is match('^' ~ (ocp_version | regex_escape) ~ '\\.[0-9]+$')"
+          - oc_binary_version == ocp_release_version
+          - openshift_installer_binary_version == ocp_release_version
+          - oc_binary_path is search('/\.venv/bin/oc$')
+          - kubectl_binary_path is search('/\.venv/bin/kubectl$')
+          - openshift_installer_binary_path is search('/\.venv/bin/openshift-install$')
+        fail_msg: >-
+          The inventory pins OpenShift {{ ocp_release_version }}, but the active
+          repo-local tools do not match. Detected oc={{ oc_binary_version }} at
+          {{ oc_binary_path }}, kubectl={{ kubectl_binary_version }} at
+          {{ kubectl_binary_path }}, and openshift-install={{ openshift_installer_binary_version }}
+          at {{ openshift_installer_binary_path }}. Run
+          ./scripts/sync-openshift-tools.sh and rerun preflight.
 
     - name: Show nmstatectl version
       ansible.builtin.command: bash -lc 'nmstatectl --version || nmstatectl -h | head -1'
@@ -229,7 +257,19 @@
     - name: Show WinRM module status
       ansible.builtin.debug:
         msg: >-
-          pywinrm {{ 'is installed; AD DNS automation can use WinRM.' if winrm_check.rc == 0 else 'is not installed; skip AD DNS automation or install requirements-python.txt in the venv.' }}
+          pywinrm {{ 'is installed; AD DNS automation can use WinRM.' if winrm_check.rc == 0 else 'is not installed; install requirements-python.txt before using AD DNS automation.' }}
+
+    - name: Require WinRM support when SNO AD DNS automation is enabled
+      ansible.builtin.assert:
+        that:
+          - winrm_check.rc == 0
+        fail_msg: >-
+          sno_dns_manage_ad_records is enabled, but pywinrm is unavailable in
+          {{ ansible_python.executable }}. Activate the repository virtual environment
+          and run: python -m pip install -r requirements-python.txt
+      when:
+        - sno_dns_automation_enabled | default(true) | bool
+        - sno_dns_manage_ad_records | default(true) | bool
 
     - name: Validate SNO static IPs are in the machine CIDR
       ansible.builtin.assert:

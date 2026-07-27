@@ -104,7 +104,7 @@ https://assisted-image-service-multicluster-engine.apps.{{ cluster_name }}.{{ ba
 Run the validation playbook before rebooting the bare-metal nodes:
 
 ```bash
-ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass
+ansible-playbook -i inventories/env/hosts.yml playbooks/04_configure_ad_dns.yml --ask-vault-pass --ask-become-pass
 ansible-playbook -i inventories/env/hosts.yml playbooks/07_validate_assisted_image_service.yml --ask-vault-pass
 ```
 

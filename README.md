@@ -68,6 +68,12 @@ The scripts ask for the Ansible Vault password once and reuse it. You can also p
 export ANSIBLE_VAULT_PASSWORD_FILE=/path/to/vault-password-file
 ```
 
+When bastion DNS resolver automation is enabled, the runner requests the Ubuntu user's local sudo password separately from the Ansible Vault password. It validates the sudo credential before starting the DNS playbook and allows up to three attempts, preventing Ansible's confusing duplicate become-password prompt. The password is stored only in a mode `0600` temporary file for the life of the script and deleted on exit. Passwordless sudo is detected automatically. For unattended execution, provide an Ansible become password file; the runner validates that file before using it:
+
+```bash
+export ANSIBLE_BECOME_PASSWORD_FILE=/path/to/local-sudo-password-file
+```
+
 ---
 
 ## 2. Create and destroy the hub
@@ -77,6 +83,15 @@ Create the SNO hub VM and wait for OpenShift to install:
 ```bash
 ./scripts/run.sh
 ```
+
+Before rendering or booting the Agent ISO, `run.sh` now performs mandatory DNS preparation:
+
+1. Creates or updates the SNO `api`, `api-int`, apps wildcard, and node records on the configured AD DNS server.
+2. Installs a persistent `systemd-resolved` route on the Ubuntu bastion for `base_domain`.
+3. Verifies every record directly against `ad_dns_server`.
+4. Verifies the same records through the normal Ubuntu system resolver used by `openshift-install`.
+
+All DNS servers, domains, record targets, retry values, and resolver settings are stored in `inventories/env/group_vars/all/main.yml`. The install stops before VM creation when DNS is unavailable or returns the wrong address. If an Agent install state already exists, `run.sh` resumes it instead of deleting the build directory and regenerating the ISO. Use `FORCE_REBUILD_HUB=true` only for a deliberate clean rebuild.
 
 Verify the hub:
 

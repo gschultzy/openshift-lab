@@ -67,7 +67,7 @@ Expected key Python packages:
 
 The `oc`, `kubectl`, and `openshift-install` binaries must be in `PATH`.
 
-The bootstrap script downloads the inventory-matched OpenShift 4.22.7 binaries from the OpenShift client mirror:
+The bootstrap script downloads the exact inventory-matched OpenShift binaries from the OpenShift client mirror:
 
 ```bash
 ./scripts/bootstrap-ubuntu-24.04.sh
@@ -143,3 +143,28 @@ nmstatectl --version
 ```
 
 Set `USE_NMSTATECTL_AGENT_SHIM=false` if you want the helper to fail instead of installing the shim. For complex NMState configs such as bonds, VLANs, or bridges, use a RHEL/Rocky bastion and install the real package with `dnf install nmstate`.
+
+## OpenShift tool version synchronization
+
+`./scripts/run.sh` checks `ocp_release_version` in
+`inventories/env/group_vars/all/main.yml` before asking for the Vault password.
+When `oc`, `kubectl`, or `openshift-install` is missing or at another patch
+version, it downloads the exact release into `.venv/bin`.
+
+Run the synchronization directly when troubleshooting:
+
+```bash
+source .venv/bin/activate
+./scripts/sync-openshift-tools.sh
+command -v oc kubectl openshift-install
+oc version --client
+kubectl version --client
+openshift-install version
+```
+
+Set `AUTO_SYNC_OPENSHIFT_TOOLS=false` only when intentionally managing all three
+binaries yourself.
+
+## Local sudo for DNS resolver automation
+
+The SNO DNS workflow writes a persistent `systemd-resolved` drop-in under `/etc/systemd/resolved.conf.d`, restarts `systemd-resolved`, and flushes its cache. The runner detects passwordless sudo; otherwise it asks for the Ubuntu login/sudo password separately from the Vault password, validates it directly with `sudo`, and reprompts up to three times before starting Ansible. For unattended runs, set `ANSIBLE_BECOME_PASSWORD_FILE` to a protected file containing that password; the runner validates the file before use.

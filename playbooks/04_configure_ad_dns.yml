@@ -1,13 +1,165 @@
 ---
-- name: Configure AD DNS records for OpenShift SNO
+- name: Create or update authoritative DNS records for the OpenShift SNO
   hosts: windows_dns
   gather_facts: false
+  any_errors_fatal: true
   tasks:
-    - name: Create or update AD DNS A records
-      community.windows.win_dns_record:
+    - name: Skip authoritative DNS changes when disabled
+      ansible.builtin.meta: end_play
+      when: >-
+        not (sno_dns_automation_enabled | default(true) | bool)
+        or not (sno_dns_manage_ad_records | default(true) | bool)
+
+    - name: Wait for the AD DNS WinRM endpoint
+      ansible.builtin.wait_for:
+        host: "{{ ad_dns_server }}"
+        port: "{{ ad_dns_port }}"
+        timeout: 15
+      delegate_to: localhost
+      become: false
+
+    - name: Validate WinRM authentication to the AD DNS server
+      ansible.windows.win_ping:
+
+    - name: Create or update the SNO DNS A records
+      ansible.windows.win_dns_record:
         name: "{{ item.name }}"
         type: "{{ item.type }}"
         value: "{{ item.value }}"
         zone: "{{ ad_dns_zone }}"
         state: present
       loop: "{{ ad_dns_records }}"
+      loop_control:
+        label: "{{ item.name }}.{{ ad_dns_zone }} -> {{ item.value }}"
+
+- name: Configure and validate DNS resolution on the Ubuntu bastion
+  hosts: ansible_controller
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Skip SNO DNS preparation when disabled
+      ansible.builtin.meta: end_play
+      when: not (sno_dns_automation_enabled | default(true) | bool)
+
+    - name: Validate required DNS automation variables
+      ansible.builtin.assert:
+        that:
+          - dns_servers is defined
+          - dns_servers | length > 0
+          - ad_dns_server is defined
+          - ad_dns_server | length > 0
+          - base_domain is defined
+          - base_domain | length > 0
+          - sno_dns_validation_records is defined
+          - sno_dns_validation_records | length >= 3
+        fail_msg: >-
+          DNS automation variables are incomplete. Configure dns_servers,
+          ad_dns_server, base_domain, and sno_dns_validation_records in
+          inventories/env/group_vars/all/main.yml.
+
+    - name: Check systemd-resolved is available
+      ansible.builtin.command: systemctl is-active systemd-resolved
+      changed_when: false
+      register: systemd_resolved_status
+      failed_when:
+        - sno_dns_configure_bastion_resolver | default(true) | bool
+        - systemd_resolved_status.rc != 0
+
+    - name: Create the systemd-resolved drop-in directory
+      ansible.builtin.file:
+        path: "{{ bastion_dns_resolved_dropin_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      become: true
+      when: sno_dns_configure_bastion_resolver | default(true) | bool
+
+    - name: Route the lab DNS zone to the configured DNS server
+      ansible.builtin.template:
+        src: "{{ repo_root }}/templates/systemd-resolved-openshift-lab.conf.j2"
+        dest: "{{ bastion_dns_resolved_dropin_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+      register: resolved_dropin
+      when: sno_dns_configure_bastion_resolver | default(true) | bool
+
+    - name: Restart systemd-resolved after DNS routing changes
+      ansible.builtin.systemd_service:
+        name: systemd-resolved
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      become: true
+      when:
+        - sno_dns_configure_bastion_resolver | default(true) | bool
+        - resolved_dropin.changed | default(false)
+
+    - name: Flush the local DNS cache
+      ansible.builtin.command: resolvectl flush-caches
+      changed_when: false
+      become: true
+      when: sno_dns_configure_bastion_resolver | default(true) | bool
+
+    - name: Show active systemd-resolved configuration
+      ansible.builtin.command: resolvectl status
+      changed_when: false
+      register: resolvectl_status
+      when: sno_dns_configure_bastion_resolver | default(true) | bool
+
+    - name: Display active DNS resolver routing
+      ansible.builtin.debug:
+        var: resolvectl_status.stdout_lines
+      when:
+        - sno_dns_configure_bastion_resolver | default(true) | bool
+        - resolvectl_status is defined
+
+    - name: Validate records directly against the authoritative DNS server
+      ansible.builtin.shell: |
+        set -o pipefail
+        dig \
+          +time={{ bastion_dns_query_timeout_seconds | int }} \
+          +tries={{ bastion_dns_query_attempts | int }} \
+          +short \
+          @{{ ad_dns_server | quote }} \
+          {{ item.name | quote }} A \
+          | sed '/^$/d' | sort -u
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: direct_dns_checks
+      until: item.expected_ip in direct_dns_checks.stdout_lines
+      retries: "{{ bastion_dns_validation_retries }}"
+      delay: "{{ bastion_dns_validation_delay_seconds }}"
+      loop: "{{ sno_dns_validation_records }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ item.expected_ip }}"
+
+    - name: Validate records through the bastion system resolver
+      ansible.builtin.shell: |
+        set -o pipefail
+        getent ahostsv4 {{ item.name | quote }} \
+          | awk '{print $1}' \
+          | sed '/^$/d' \
+          | sort -u
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: system_dns_checks
+      until: item.expected_ip in system_dns_checks.stdout_lines
+      retries: "{{ bastion_dns_validation_retries }}"
+      delay: "{{ bastion_dns_validation_delay_seconds }}"
+      loop: "{{ sno_dns_validation_records }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ item.expected_ip }}"
+
+    - name: Show validated SNO DNS records
+      ansible.builtin.debug:
+        msg: >-
+          DNS is ready: {{ item.item.name }} resolves to
+          {{ item.item.expected_ip }} through the Ubuntu system resolver.
+      loop: "{{ system_dns_checks.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

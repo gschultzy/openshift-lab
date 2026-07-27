@@ -73,10 +73,10 @@ The bootstrap script downloads the exact inventory-matched OpenShift binaries fr
 ./scripts/bootstrap-ubuntu-24.04.sh
 ```
 
-To intentionally follow the moving 4.22 stable stream instead:
+To intentionally follow the moving 4.21 stable stream instead:
 
 ```bash
-OPENSHIFT_VERSION=stable-4.22 ./scripts/bootstrap-ubuntu-24.04.sh
+OPENSHIFT_VERSION=stable-4.21 ./scripts/bootstrap-ubuntu-24.04.sh
 ```
 
 Validate afterwards:

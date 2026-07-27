@@ -17,6 +17,9 @@ source scripts/lib/hcp-tenants.sh
 INV="${INV:-$ENV_INVENTORY_FILE}"
 ROOT_DIR="$PWD"
 
+./scripts/assert-release-baseline.sh
+./scripts/sync-openshift-tools.sh
+
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   VAULT_ARGS=(--vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE")
 else
@@ -53,7 +56,7 @@ export HCP_RECREATE="${HCP_RECREATE:-false}"
 export HCP_NODEPOOL_REPLICAS="${HCP_NODEPOOL_REPLICAS:-3}"
 export HCP_WORKER_CORES="${HCP_WORKER_CORES:-8}"
 export HCP_WORKER_MEMORY="${HCP_WORKER_MEMORY:-8Gi}"
-export HCP_CHANNEL="${HCP_CHANNEL:-fast-4.22}"
+export HCP_CHANNEL="${HCP_CHANNEL:-stable-4.21}"
 export HCP_ETCD_VOLUME_SIZE="${HCP_ETCD_VOLUME_SIZE:-8Gi}"
 export HCP_KUBECONFIG_WAIT_RETRIES="${HCP_KUBECONFIG_WAIT_RETRIES:-90}"
 export HCP_KUBECONFIG_WAIT_DELAY="${HCP_KUBECONFIG_WAIT_DELAY:-10}"
@@ -225,6 +228,7 @@ hcp_tenants | while IFS='|' read -r site name mc cluster_cidr service_cidr extra
     "$site" "$name" "$mc" "$cluster_cidr" "$service_cidr" "$extra_disks"
 done
 
+./scripts/fix-acm-hypershift-local-hosting.sh
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/18_check_spoke_mce_conflicts.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/17_configure_acm_mce_integration.yml

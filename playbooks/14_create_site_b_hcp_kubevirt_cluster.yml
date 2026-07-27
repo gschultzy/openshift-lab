@@ -218,7 +218,7 @@
           echo "Existing HCP storage/settings:"
           oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get hostedcluster {{ site_b_hcp_cluster_name }} -o yaml | egrep -A18 -i 'channel:|release:|etcd:|storageClass|storageDriver|baseDomainPassthrough|infraStorageClass|guestStorageClass' || true
           oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_hcp_namespace }} get nodepool {{ site_b_hcp_cluster_name }} -o yaml | egrep -A28 -i 'config:|platform:|kubevirt:|rootVolume|storageClass|accessModes|volumeMode|compute:|cores:|memory:|kubevirt-vm-jsonpatch' || true
-          echo "To recreate with the desired template-backed OpenShift 4.22 settings, rerun with HCP_RECREATE=true."
+          echo "To recreate with the desired template-backed OpenShift 4.21 settings, rerun with HCP_RECREATE=true."
           exit 0
         fi
 

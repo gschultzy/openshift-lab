@@ -98,7 +98,7 @@ then the node successfully booted the Assisted Installer image, but it cannot do
 rootfs from the hub route:
 
 ```text
-https://assisted-image-service-multicluster-engine.apps.{{ cluster_name }}.{{ base_domain }}/boot-artifacts/rootfs?arch=x86_64&version=4.22
+https://assisted-image-service-multicluster-engine.apps.{{ cluster_name }}.{{ base_domain }}/boot-artifacts/rootfs?arch=x86_64&version=4.21
 ```
 
 Run the validation playbook before rebooting the bare-metal nodes:

@@ -16,6 +16,9 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+./scripts/assert-release-baseline.sh
+./scripts/sync-openshift-tools.sh
+
 # Ask for the Ansible Vault password once, then reuse it for every playbook.
 # If ANSIBLE_VAULT_PASSWORD_FILE is already set, use that instead and do not prompt.
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
@@ -87,6 +90,9 @@ require_hub_up() {
 
 
 require_hub_up
+# Ensure the hub is healthy and configured as management-only for HCP before Site-B work.
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
 run_playbook playbooks/10_configure_site_b_ad_dns.yml
 # This discovery step now auto-fills CHANGE_ME_* boot_mac placeholders for Site-B
 # using Integrated NIC 1 Port 1 when it is link-up at 25Gbps.

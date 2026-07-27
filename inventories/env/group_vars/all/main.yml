@@ -2,11 +2,11 @@
 # ---------------------------------------------------------------------------
 # OpenShift release / cluster identity
 # ---------------------------------------------------------------------------
-# Pinned to the latest accepted OpenShift 4.22 stable release verified on 2026-07-26.
+# Pinned to OpenShift 4.21.25, verified as the current 4.21 z-stream on 2026-07-27.
 # Keep ocp_version and ocp_release_version aligned with the installed oc and
 # openshift-install binaries; preflight validates the exact patch version.
-ocp_version: "4.22"
-ocp_release_version: "4.22.7"
+ocp_version: "4.21"
+ocp_release_version: "4.21.25"
 cluster_name: lab-sno
 base_domain: poc.local
 cluster_fqdn: "{{ cluster_name }}.{{ base_domain }}"
@@ -304,6 +304,23 @@ acm_subscription_name: advanced-cluster-management
 # Basic is much lighter and is preferred for a lab/SNO hub.
 acm_availability_config: Basic
 acm_disable_hub_self_management: false
+
+# Multicluster Engine / Hosted Control Planes topology.
+# The SNO hub manages HCP but does not host tenant control planes itself.
+# Site-A and Site-B are the dedicated HCP hosting clusters.
+mce_name: multiclusterengine
+mce_local_cluster_name: local-cluster
+mce_hypershift_enabled: true
+mce_hypershift_local_hosting_enabled: false
+mce_hypershift_addon_name: hypershift-addon
+# MCE 2.11 renders the local HyperShift add-on and its pre-delete cleanup Job
+# into this namespace. Create it before disabling local HCP hosting.
+mce_hypershift_addon_work_namespace: open-cluster-management-agent-addon-discovery
+mce_remove_stale_local_hypershift_addon: true
+mce_local_addon_cleanup_grace_seconds: 180
+mce_local_addon_delete_timeout_seconds: 600
+mce_repair_timeout_seconds: 1200
+mce_repair_poll_seconds: 15
 
 # ACM installation monitoring. The runner prints MCH conditions, CSV state,
 # non-ready pods and degraded cluster operators while ACM is installing.
@@ -672,7 +689,7 @@ site_a_hcp_nodepool_replicas: 3
 site_a_hcp_worker_cores: 8
 site_a_hcp_worker_memory: 8Gi
 site_a_hcp_release_image: "{{ bm_cluster_release_image }}"
-site_a_hcp_channel: fast-4.22
+site_a_hcp_channel: stable-4.21
 site_a_hcp_pull_secret_name: openshift-pull-secret
 site_a_hcp_ssh_key_name: tenant-ssh-key
 site_a_hcp_machine_config_name: px-non-rotational
@@ -776,7 +793,7 @@ site_b_hcp_nodepool_replicas: 3
 site_b_hcp_worker_cores: 8
 site_b_hcp_worker_memory: 8Gi
 site_b_hcp_release_image: "{{ bm_cluster_release_image }}"
-site_b_hcp_channel: fast-4.22
+site_b_hcp_channel: stable-4.21
 site_b_hcp_pull_secret_name: openshift-pull-secret
 site_b_hcp_ssh_key_name: tenant-ssh-key
 site_b_hcp_machine_config_name: px-non-rotational
@@ -867,11 +884,8 @@ portworx_pure_san_type: FC
 # Enable iscsid only when changing portworx_pure_san_type to iSCSI.
 portworx_pure_enable_iscsid: false
 
-# Portworx Enterprise 3.6.1.1 is pinned by this lab. At the time this inventory
-# was prepared, the published PE support matrix listed OpenShift through 4.21,
-# while PX-CSI 26.2 listed OpenShift 4.22. Keep this true only for the POC and
-# obtain an Everpure support statement before treating PE on OCP 4.22 as supported.
-portworx_poc_allow_ocp_4_22: true
+# Portworx Enterprise 3.6.1.1 is pinned by this lab. The OpenShift baseline is
+# intentionally held at 4.21 for the RHACM 2.16 / MCE 2.11 / HCP design.
 
 # Site-A FlashArray: only Site-A nodes should be FC-zoned and registered here.
 site_a_pure_flasharray_name: SV16-X90R4-B10-01

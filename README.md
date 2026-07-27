@@ -1,6 +1,8 @@
 # OpenShift Hub, Spokes and Hosted Control Planes Lab
 
-This repository builds a complete OpenShift lab with:
+This repository is pinned consistently to **OpenShift 4.21.25** for the SNO hub, Site-A, Site-B, and all Hosted Control Plane guests. RHACM uses `release-2.16` with MCE `2.11`.
+
+This repository builds:
 
 - An Ubuntu 24.04 Ansible bastion.
 - A vSphere Single Node OpenShift management hub.
@@ -42,9 +44,9 @@ Run all commands from the repository root.
                t1-px      t2-kv               t1-px      t2-kv
 ```
 
-The **SNO hub** is the central management cluster. It runs RHACM, MCE, and Assisted Installer and manages the two physical spoke clusters and the HCP tenant clusters.
+The **SNO hub** is the central management cluster. It runs RHACM, MCE, and Assisted Installer and manages the two physical spoke clusters and the HCP tenant clusters. The SNO is **management-only for HCP**: the global HCP capability remains enabled, while `hypershift-local-hosting` is disabled so tenant control planes are not scheduled on the SNO.
 
-**Site-A** and **Site-B** are independent OpenShift clusters. They act as HCP hosting clusters: the Hosted Control Plane components and KubeVirt worker virtual machines run on these clusters.
+**Site-A** and **Site-B** are independent OpenShift clusters. They act as the dedicated HCP hosting clusters: the Hosted Control Plane components and KubeVirt worker virtual machines run on these clusters.
 
 Each site uses only its assigned Pure FlashArray:
 
@@ -65,6 +67,29 @@ Use this order:
 4. Deploy the dedicated Portworx/Pure storage at each site.
 5. Create and import the HCP tenant clusters.
 6. Verify the complete environment from the RHACM hub.
+
+## Clean Rebuild from the Previous Environment
+
+OpenShift cannot be downgraded in place. Do not reuse the existing `build/` directory or resume the previous installation. While the old hub is still reachable, remove the environment in this order:
+
+```bash
+./scripts/hcp-delete.sh
+# Run this destructive step only when Portworx was installed on the spokes:
+CONFIRM_PORTWORX_WIPE=true ./scripts/portworx-uninstall-and-wipe-spokes.sh
+CONFIRM_DELETE_SITE_B=true ./scripts/site-b-delete.sh
+CONFIRM_DELETE_SITE_A=true ./scripts/site-a-delete.sh
+CONFIRM_DELETE_HUB=true ./scripts/hub-delete.sh
+```
+
+Then prepare the repository for a clean OpenShift 4.21 build:
+
+```bash
+CONFIRM_PREPARE_421_REBUILD=true ./scripts/prepare-clean-4.21-rebuild.sh
+```
+
+The preparation script archives remaining generated state and removes repo-local OpenShift binaries. The bastion bootstrap then downloads the exact `4.21.25` versions of `oc` and `openshift-install`. It preserves `main.yml`, the encrypted `vault.yml`, and all repository source files.
+
+The main deployment and HCP scripts also run `assert-release-baseline.sh`. They stop rather than connect to or resume an OpenShift release from another minor version.
 
 ## Configuration
 
@@ -437,4 +462,14 @@ To resume the Site-A workflow safely:
 
 ```bash
 ./scripts/run-site-a-day2.sh
+```
+## MCE and HCP Management Topology
+
+The SNO hub runs RHACM and MCE but does not host tenant control planes. The automation keeps global HyperShift enabled, disables `hypershift-local-hosting`, and pre-creates the MCE add-on work namespace before the cleanup workflow begins. Site-A and Site-B retain their own `hypershift-addon` resources and remain the dedicated HCP hosting clusters.
+
+The topology check runs automatically during the full deployment, Site-A and Site-B day-2 workflows, RHACM/MCE integration, and HCP creation. To run it manually:
+
+```bash
+export KUBECONFIG="$PWD/build/lab-sno/install/auth/kubeconfig"
+./scripts/fix-acm-hypershift-local-hosting.sh
 ```

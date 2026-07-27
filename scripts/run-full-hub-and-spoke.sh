@@ -16,6 +16,9 @@ fi
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+./scripts/assert-release-baseline.sh
+./scripts/sync-openshift-tools.sh
+
 # Shared Vault and validated local sudo authentication.
 # shellcheck source=scripts/lib/ansible-auth.sh
 source scripts/lib/ansible-auth.sh
@@ -85,6 +88,8 @@ run_hub_install_if_needed
 run_playbook playbooks/02_add_sno_extra_disk.yml
 run_playbook playbooks/05_install_lvm_storage.yml
 run_playbook playbooks/06_install_acm.yml
+# Keep HCP globally enabled but do not host tenant control planes on the SNO hub.
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
 run_playbook playbooks/07_configure_assisted_service.yml
 run_playbook playbooks/07_enable_baremetal_provisioning.yml

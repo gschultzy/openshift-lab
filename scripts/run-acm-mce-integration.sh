@@ -33,6 +33,7 @@ fi
 
 export KUBECONFIG="${HUB_KUBECONFIG:-$ENV_HUB_KUBECONFIG}"
 
+./scripts/fix-acm-hypershift-local-hosting.sh
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml
 
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/18_check_spoke_mce_conflicts.yml

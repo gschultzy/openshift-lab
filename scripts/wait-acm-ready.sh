@@ -11,6 +11,7 @@ export KUBECONFIG
 ACM_NAMESPACE="${ACM_NAMESPACE:-$(inventory_value acm_namespace)}"
 MCH_NAME="${MCH_NAME:-$(inventory_value acm_multiclusterhub_name)}"
 SUBSCRIPTION_NAME="${ACM_SUBSCRIPTION_NAME:-$(inventory_value acm_subscription_name)}"
+MCE_NAME="${MCE_NAME:-$(inventory_value mce_name)}"
 TIMEOUT_SECONDS="${ACM_WAIT_TIMEOUT_SECONDS:-$(inventory_value acm_wait_timeout_seconds)}"
 POLL_SECONDS="${ACM_WAIT_POLL_SECONDS:-$(inventory_value acm_wait_poll_seconds)}"
 
@@ -33,10 +34,10 @@ while true; do
   elapsed=$((now_epoch - start_epoch))
   phase="$(oc -n "$ACM_NAMESPACE" get mch "$MCH_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   [[ -n "$phase" ]] || phase="Pending"
-  csv="$(oc -n "$ACM_NAMESPACE" get subscription "$SUBSCRIPTION_NAME" -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
+  csv="$(oc -n "$ACM_NAMESPACE" get subscriptions.operators.coreos.com "$SUBSCRIPTION_NAME" -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
   csv_phase="unknown"
   if [[ -n "$csv" ]]; then
-    csv_phase="$(oc -n "$ACM_NAMESPACE" get csv "$csv" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    csv_phase="$(oc -n "$ACM_NAMESPACE" get clusterserviceversions.operators.coreos.com "$csv" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     [[ -n "$csv_phase" ]] || csv_phase="unknown"
   fi
 
@@ -47,6 +48,15 @@ while true; do
     | jq -r '.status.conditions[]? | select(.status=="False" or .status=="Unknown" or .type=="Complete") | "  \(.type)=\(.status) reason=\(.reason // \"-\") message=\(.message // \"-\")"' 2>/dev/null || true)"
   if [[ -n "$conditions" ]]; then
     echo "$conditions"
+  fi
+
+  mce_phase="$(oc get mce "$MCE_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  mce_available="$(oc get mce "$MCE_NAME" -o json 2>/dev/null | jq -r '.status.conditions[]? | select(.type=="Available") | .status' | tail -1)"
+  printf '  MCE=%s Available=%s\n' "${mce_phase:-not-created}" "${mce_available:-unknown}"
+  mce_blockers="$(oc get mce "$MCE_NAME" -o json 2>/dev/null \
+    | jq -r '.status.components[]? | select(.status=="False" or .status=="Unknown") | "  BLOCKER: \(.kind)/\(.name) status=\(.status) reason=\(.reason // "-") message=\(.message // "-")"' 2>/dev/null || true)"
+  if [[ -n "$mce_blockers" ]]; then
+    echo "$mce_blockers"
   fi
 
   nonready="$(oc get pods -A --no-headers 2>/dev/null \

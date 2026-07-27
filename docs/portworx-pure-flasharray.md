@@ -181,6 +181,6 @@ SITE=site-b ./scripts/cleanup-pure-portworx-volumes.sh
 
 It removes only matching Portworx-created volume names on the selected array. Always verify the displayed site and array before entering the confirmation token.
 
-## OpenShift 4.22 support warning
+## OpenShift 4.21 baseline
 
-This lab pins Portworx Enterprise `3.6.1.1`. The published Portworx Enterprise 3.6.1 support matrix currently lists OpenShift through 4.21, while PX-CSI 26.2 lists OpenShift 4.22. The inventory therefore marks this as a POC acknowledgement with `portworx_poc_allow_ocp_4_22: true`. Obtain an Everpure support statement or use a qualified version before production deployment.
+This repository pins OpenShift `4.21.25` for the SNO hub, Site-A, Site-B, and HCP guests. Portworx Enterprise `3.6.1.1` remains pinned by the lab configuration. Validate the final Portworx and Pure support statement before production use.

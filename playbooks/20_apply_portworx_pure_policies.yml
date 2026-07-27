@@ -56,24 +56,6 @@
           No Portworx site matched '{{ portworx_pure_site_filter }}'.
           Valid values are: {{ portworx_pure_sites | map(attribute='name') | join(', ') }}.
 
-    - name: Warn that Portworx Enterprise 3.6.1.1 is a POC configuration on OpenShift 4.22
-      ansible.builtin.debug:
-        msg:
-          - "WARNING: This lab pins Portworx Enterprise 3.6.1.1 on OpenShift {{ ocp_release_version }}."
-          - "The published PE 3.6.1 support matrix lists OCP through 4.21; obtain Everpure support confirmation for OCP 4.22 before production use."
-      when:
-        - ocp_version == '4.22'
-        - portworx_poc_allow_ocp_4_22 | default(false) | bool
-
-    - name: Stop unsupported OCP 4.22 deployment unless POC acknowledgement is enabled
-      ansible.builtin.fail:
-        msg: |
-          Portworx Enterprise 3.6.1.1 is not listed in the published support matrix for OpenShift 4.22.
-          For a lab-only POC, set portworx_poc_allow_ocp_4_22: true in main.yml.
-      when:
-        - ocp_version == '4.22'
-        - not (portworx_poc_allow_ocp_4_22 | default(false) | bool)
-
     - name: Ensure Portworx/Pure RHACM policy namespace exists
       ansible.builtin.shell: |
         set -euo pipefail

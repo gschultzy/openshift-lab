@@ -33,7 +33,7 @@
 
     - name: Wait for ACM Subscription to select an installed CSV
       ansible.builtin.command: >-
-        oc -n {{ acm_namespace }} get subscription {{ acm_subscription_name }}
+        oc -n {{ acm_namespace }} get subscriptions.operators.coreos.com {{ acm_subscription_name }}
         -o jsonpath='{.status.installedCSV}'
       register: acm_installed_csv
       changed_when: false
@@ -49,7 +49,7 @@
 
     - name: Wait for the ACM ClusterServiceVersion to succeed
       ansible.builtin.command: >-
-        oc -n {{ acm_namespace }} get csv {{ acm_installed_csv.stdout }}
+        oc -n {{ acm_namespace }} get clusterserviceversions.operators.coreos.com {{ acm_installed_csv.stdout }}
         -o jsonpath='{.status.phase}'
       register: acm_csv_phase
       changed_when: false
@@ -64,6 +64,18 @@
       retries: 80
       delay: 15
       until: mch_crd.rc == 0
+
+    - name: Pre-create the MCE HyperShift add-on work namespace
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc create namespace {{ mce_hypershift_addon_work_namespace }} --dry-run=client -o yaml | oc apply -f -
+      args:
+        executable: /bin/bash
+      register: mce_hypershift_work_namespace
+      changed_when: >-
+        'created' in mce_hypershift_work_namespace.stdout or
+        'configured' in mce_hypershift_work_namespace.stdout
+      when: not (mce_hypershift_local_hosting_enabled | bool)
 
     - name: Create or update MultiClusterHub
       ansible.builtin.command: "oc apply -f {{ acm_rendered_dir }}/03-multiclusterhub.yaml"

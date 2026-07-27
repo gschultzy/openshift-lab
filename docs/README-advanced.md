@@ -138,7 +138,7 @@ source .venv/bin/activate
 ```
 
 The script reads the exact OpenShift client and installer release from
-`ocp_release_version` in `inventories/env/group_vars/all/main.yml`. Keep the
+`ocp_release_version` in `inventories/env/group_vars/all/main.yml` (currently `4.21.25`). Keep the
 release pin in that inventory rather than duplicating it in bootstrap commands.
 
 The bootstrap installs the Ubuntu packages, creates a Python virtual environment, installs the Python module requirements, installs the Ansible Galaxy collections, installs or wraps `nmstatectl`, and places `oc`, `kubectl`, and `openshift-install` in `/usr/local/bin`.

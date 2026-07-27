@@ -28,13 +28,22 @@ oc -n "$ACM_NAMESPACE" get mch "$MCH_NAME" -o json 2>/dev/null \
 
 echo
 echo "--- ACM Subscription and CSV ---"
-oc -n "$ACM_NAMESPACE" get subscription "$SUBSCRIPTION_NAME" -o wide 2>&1 || true
-CSV="$(oc -n "$ACM_NAMESPACE" get subscription "$SUBSCRIPTION_NAME" -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
+oc -n "$ACM_NAMESPACE" get subscriptions.operators.coreos.com "$SUBSCRIPTION_NAME" -o wide 2>&1 || true
+CSV="$(oc -n "$ACM_NAMESPACE" get subscriptions.operators.coreos.com "$SUBSCRIPTION_NAME" -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
 if [[ -n "$CSV" ]]; then
-  oc -n "$ACM_NAMESPACE" get csv "$CSV" -o wide 2>&1 || true
-  oc -n "$ACM_NAMESPACE" get csv "$CSV" -o json 2>/dev/null \
+  oc -n "$ACM_NAMESPACE" get clusterserviceversions.operators.coreos.com "$CSV" -o wide 2>&1 || true
+  oc -n "$ACM_NAMESPACE" get clusterserviceversions.operators.coreos.com "$CSV" -o json 2>/dev/null \
     | jq -r '.status.conditions[]? | "\(.phase // .type)=\(.status // \"-\") reason=\(.reason // \"-\") message=\(.message // \"-\")"' 2>/dev/null || true
 fi
+
+echo
+echo "--- MultiClusterEngine status and blockers ---"
+MCE_NAME="${MCE_NAME:-$(inventory_value mce_name)}"
+oc get mce "$MCE_NAME" -o wide 2>&1 || true
+oc get mce "$MCE_NAME" -o json 2>/dev/null \
+  | jq -r '.status.conditions[]? | "\(.type)=\(.status) reason=\(.reason // "-") message=\(.message // "-")"' 2>/dev/null || true
+oc get mce "$MCE_NAME" -o json 2>/dev/null \
+  | jq -r '.status.components[]? | select(.status=="False" or .status=="Unknown") | "BLOCKER: \(.kind)/\(.name) status=\(.status) reason=\(.reason // "-") message=\(.message // "-")"' 2>/dev/null || true
 
 echo
 echo "--- Non-ready ACM and MCE pods ---"
@@ -62,15 +71,19 @@ echo "--- Recent warning events ---"
 oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp 2>/dev/null | tail -n "$EVENT_LINES" || true
 
 echo
-echo "--- MultiClusterHub operator log ---"
-OPERATOR_POD="$(oc -n "$ACM_NAMESPACE" get pods -l name=multiclusterhub-operator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-if [[ -z "$OPERATOR_POD" ]]; then
-  OPERATOR_POD="$(oc -n "$ACM_NAMESPACE" get pods -o name 2>/dev/null | grep 'multiclusterhub-operator' | head -1 | cut -d/ -f2 || true)"
+echo "--- MultiClusterHub operator logs ---"
+OPERATOR_PODS="$(oc -n "$ACM_NAMESPACE" get pods -l name=multiclusterhub-operator -o name 2>/dev/null || true)"
+if [[ -z "$OPERATOR_PODS" ]]; then
+  OPERATOR_PODS="$(oc -n "$ACM_NAMESPACE" get pods -o name 2>/dev/null | grep 'multiclusterhub-operator' || true)"
 fi
-if [[ -n "$OPERATOR_POD" ]]; then
-  oc -n "$ACM_NAMESPACE" logs "$OPERATOR_POD" --all-containers --tail="$LOG_LINES" 2>&1 || true
+if [[ -n "$OPERATOR_PODS" ]]; then
+  while read -r pod; do
+    [[ -n "$pod" ]] || continue
+    echo "===== $pod ====="
+    oc -n "$ACM_NAMESPACE" logs "$pod" --all-containers --tail="$LOG_LINES" 2>&1 || true
+  done <<< "$OPERATOR_PODS"
 else
-  echo "MultiClusterHub operator pod not found."
+  echo "MultiClusterHub operator pods not found."
 fi
 
 echo "================================================="

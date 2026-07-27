@@ -16,6 +16,8 @@ source scripts/lib/inventory-env.sh
 
 INV="${INV:-$ENV_INVENTORY_FILE}"
 
+./scripts/assert-release-baseline.sh
+
 # Keep repo-local OpenShift tools aligned with ocp_release_version before the
 # Vault prompt and before Ansible preflight. Set AUTO_SYNC_OPENSHIFT_TOOLS=false
 # only when deliberately managing the binaries yourself.

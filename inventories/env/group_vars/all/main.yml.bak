@@ -305,6 +305,25 @@ acm_subscription_name: advanced-cluster-management
 acm_availability_config: Basic
 acm_disable_hub_self_management: false
 
+# RHACM Fleet Virtualization integration.
+# cnv-mtv-integrations provides the Fleet Virtualization and MTV integration.
+# fine-grained-rbac enables the RHACM 2.16 virtualization roles and centralized
+# MultiClusterRoleAssignment support. Only the physical HCP hosting clusters are
+# targeted; the management SNO and hosted tenant clusters are intentionally not.
+acm_virtualization_enabled: true
+acm_virtualization_fine_grained_rbac_enabled: true
+acm_virtualization_managed_clusters:
+  - site-a
+  - site-b
+# ACM 2.16 merges the old kubevirt-hyperconverged-operator add-on into
+# kubevirt-hyperconverged. Do not wait for the obsolete third add-on.
+acm_virtualization_expected_addons:
+  - mtv-operator
+  - kubevirt-hyperconverged
+acm_virtualization_cleanup_legacy_215_addon: true
+acm_virtualization_wait_timeout_seconds: 1800
+acm_virtualization_wait_poll_seconds: 15
+
 # Multicluster Engine / Hosted Control Planes topology.
 # The SNO hub manages HCP but does not host tenant control planes itself.
 # Site-A and Site-B are the dedicated HCP hosting clusters.
@@ -313,6 +332,17 @@ mce_local_cluster_name: local-cluster
 mce_hypershift_enabled: true
 mce_hypershift_local_hosting_enabled: false
 mce_hypershift_addon_name: hypershift-addon
+
+# Wait for the hub-managed HyperShift add-on to deploy the operator and CRDs
+# to Site-A and Site-B. Do not use a separate direct hcp install fallback.
+hcp_hypershift_addon_wait_timeout_seconds: 1800
+hcp_hypershift_addon_wait_poll_seconds: 15
+
+# Portworx is installed through RHACM policies and therefore converges
+# asynchronously. HCP creation waits for the Operator CRD, StorageCluster
+# object and status.phase=Running before preparing HCP StorageClasses.
+hcp_portworx_wait_timeout_seconds: 3600
+hcp_portworx_wait_poll_seconds: 30
 # MCE 2.11 renders the local HyperShift add-on and its pre-delete cleanup Job
 # into this namespace. Create it before disabling local HCP hosting.
 mce_hypershift_addon_work_namespace: open-cluster-management-agent-addon-discovery

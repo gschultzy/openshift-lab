@@ -255,13 +255,14 @@ This automation:
 1. Validates the bastion, OpenShift tools, inventory, vSphere, and networks.
 2. Creates and validates the SNO DNS records.
 3. Builds or resumes the vSphere SNO hub.
-4. Installs hub storage, RHACM, MCE, and Assisted Installer.
+4. Installs hub storage, RHACM, MCE, Fleet Virtualization, fine-grained virtualization RBAC, and Assisted Installer.
 5. Discovers and validates the Site-A iDRAC NIC and boot MAC details.
 6. Deploys Site-A and imports it into RHACM.
 7. Applies the Site-A HCP hosting prerequisites and RHACM policies.
 8. Discovers and validates the Site-B iDRAC NIC and boot MAC details.
 9. Deploys Site-B and imports it into RHACM.
 10. Applies the Site-B HCP hosting prerequisites and RHACM policies.
+11. Labels Site-A and Site-B for RHACM Fleet Virtualization and MTV integration.
 
 The workflow is resumable. Completed hub and spoke work is skipped where possible.
 
@@ -415,7 +416,7 @@ oc --kubeconfig "$HCP_KUBECONFIG_DIR/site-a-hcp-t1-px.kubeconfig" get nodes
 
 ## Main Commands
 
-Build or resume only the SNO hub:
+Build or resume the SNO hub and reconcile its LVM, RHACM/MCE, and Fleet Virtualization services:
 
 ```bash
 ./scripts/run.sh
@@ -444,6 +445,12 @@ Create and import all HCP tenants:
 ```bash
 ./scripts/hcp-create.sh
 ```
+
+Both primary runners enable RHACM Fleet Virtualization automatically. They set
+`cnv-mtv-integrations=true` and `fine-grained-rbac=true` on the hub
+`MultiClusterHub`, then label the physical managed clusters with
+`acm/cnv-operator-install=true`. The management SNO and hosted tenant clusters
+are not selected.
 
 Troubleshooting information is available in:
 
@@ -542,3 +549,13 @@ creates tenant clusters:
 The runner does not use `hcp install render` as a fallback. The Red Hat `hcp`
 binary shipped by the environment is used for hosted-cluster lifecycle and
 kubeconfig export after the hub-managed add-on has installed the operator.
+
+### ACM 2.16 virtualization add-on names
+
+ACM 2.16 uses two Fleet Virtualization add-ons: `mtv-operator` and
+`kubevirt-hyperconverged`. The older ACM 2.15
+`kubevirt-hyperconverged-operator` add-on was merged into
+`kubevirt-hyperconverged` and must not be included in readiness waits. The
+virtualization playbook removes that obsolete object when it is found, labels
+existing Site-A and Site-B ManagedClusters, and prints live diagnostics while
+waiting for the two ACM 2.16 add-ons.

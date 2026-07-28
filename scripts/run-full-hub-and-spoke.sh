@@ -93,6 +93,9 @@ run_playbook playbooks/06_install_acm.yml
 # Keep HCP globally enabled but do not host tenant control planes on the SNO hub.
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
+# Enable Fleet Virtualization and fine-grained virtualization RBAC on the hub.
+# On a fresh build the spoke labels are deferred until each ManagedCluster joins.
+run_playbook playbooks/06_enable_acm_virtualization.yml
 run_playbook playbooks/07_configure_assisted_service.yml
 run_playbook playbooks/07_enable_baremetal_provisioning.yml
 # Site-A
@@ -105,6 +108,9 @@ run_playbook playbooks/09_wait_baremetal_cluster.yml
 # Site-A ACM Governance / HCP hosting policies
 run_playbook playbooks/12_apply_site_a_hcp_policies.yml
 run_playbook playbooks/12_fix_site_a_policy_placement.yml
+# OpenShift Virtualization is now declared by the Site-A policy; select the
+# cluster for RHACM Fleet Virtualization and MTV integration.
+run_playbook playbooks/06_enable_acm_virtualization.yml
 
 # Site-B
 run_playbook playbooks/10_configure_site_b_ad_dns.yml
@@ -117,3 +123,6 @@ run_playbook playbooks/09_wait_site_b_baremetal_cluster.yml
 # Site-B ACM Governance / HCP hosting policies
 run_playbook playbooks/12_apply_site_b_hcp_policies.yml
 run_playbook playbooks/12_fix_site_b_policy_placement.yml
+# OpenShift Virtualization is now declared by the Site-B policy; ensure both
+# physical hosting clusters are selected for Fleet Virtualization and MTV.
+run_playbook playbooks/06_enable_acm_virtualization.yml

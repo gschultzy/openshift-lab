@@ -305,6 +305,25 @@ acm_subscription_name: advanced-cluster-management
 acm_availability_config: Basic
 acm_disable_hub_self_management: false
 
+# RHACM Fleet Virtualization integration.
+# cnv-mtv-integrations provides the Fleet Virtualization and MTV integration.
+# fine-grained-rbac enables the RHACM 2.16 virtualization roles and centralized
+# MultiClusterRoleAssignment support. Only the physical HCP hosting clusters are
+# targeted; the management SNO and hosted tenant clusters are intentionally not.
+acm_virtualization_enabled: true
+acm_virtualization_fine_grained_rbac_enabled: true
+acm_virtualization_managed_clusters:
+  - site-a
+  - site-b
+# ACM 2.16 merges the old kubevirt-hyperconverged-operator add-on into
+# kubevirt-hyperconverged. Do not wait for the obsolete third add-on.
+acm_virtualization_expected_addons:
+  - mtv-operator
+  - kubevirt-hyperconverged
+acm_virtualization_cleanup_legacy_215_addon: true
+acm_virtualization_wait_timeout_seconds: 1800
+acm_virtualization_wait_poll_seconds: 15
+
 # Multicluster Engine / Hosted Control Planes topology.
 # The SNO hub manages HCP but does not host tenant control planes itself.
 # Site-A and Site-B are the dedicated HCP hosting clusters.
@@ -414,7 +433,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.81
-    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:5E:E0"
     ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -425,7 +444,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.82
-    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:40:C0"
     ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -436,7 +455,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.83
-    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F1:C0"
     ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -490,7 +509,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.84
-    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:6C:10"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -501,7 +520,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.85
-    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F6:80"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -512,7 +531,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.86
-    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F7:00"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1

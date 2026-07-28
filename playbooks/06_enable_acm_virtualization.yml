@@ -1,0 +1,244 @@
+---
+- name: Enable RHACM Fleet Virtualization and target the physical hosting clusters
+  hosts: ansible_controller
+  gather_facts: false
+  environment:
+    KUBECONFIG: "{{ hub_kubeconfig }}"
+  tasks:
+    - name: Stop if RHACM virtualization is disabled in inventory
+      ansible.builtin.meta: end_play
+      when: not (acm_virtualization_enabled | bool)
+
+    - name: Validate RHACM virtualization configuration
+      ansible.builtin.assert:
+        that:
+          - not (acm_disable_hub_self_management | bool)
+          - acm_virtualization_managed_clusters is iterable
+          - acm_virtualization_managed_clusters | length > 0
+          - "'local-cluster' not in acm_virtualization_managed_clusters"
+        fail_msg: >-
+          RHACM virtualization requires hub self-management and must target only
+          the physical managed clusters. Keep disableHubSelfManagement=false and
+          do not include local-cluster in acm_virtualization_managed_clusters.
+
+    - name: Wait for MultiClusterHub and its component override list
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }} -o json |
+          jq -e '
+            (.spec.overrides.components // []) as $components |
+            .spec.disableHubSelfManagement != true and
+            ($components | type == "array") and
+            any($components[]; .name == "cnv-mtv-integrations") and
+            any($components[]; .name == "fine-grained-rbac")
+          ' >/dev/null
+      args:
+        executable: /bin/bash
+      register: acm_virtualization_mch_components
+      changed_when: false
+      retries: "{{ ((acm_virtualization_wait_timeout_seconds | int) / (acm_virtualization_wait_poll_seconds | int)) | int }}"
+      delay: "{{ acm_virtualization_wait_poll_seconds | int }}"
+      until: acm_virtualization_mch_components.rc == 0
+
+    - name: Enable RHACM Fleet Virtualization components safely by component name
+      ansible.builtin.shell: |
+        set -euo pipefail
+        patch_component() {
+          local component="$1"
+          local desired="$2"
+          local index current
+
+          index="$(
+            oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }} -o json |
+              jq -r --arg component "$component" '
+                .spec.overrides.components | map(.name) | index($component)
+              '
+          )"
+
+          if [[ -z "$index" || "$index" == "null" ]]; then
+            echo "ERROR: MultiClusterHub component $component is not present." >&2
+            exit 1
+          fi
+
+          current="$(
+            oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }} \
+              -o jsonpath="{.spec.overrides.components[$index].enabled}"
+          )"
+
+          if [[ "$current" == "$desired" ]]; then
+            echo "UNCHANGED: $component=$desired"
+            return 0
+          fi
+
+          oc -n {{ acm_namespace }} patch multiclusterhub {{ acm_multiclusterhub_name }} \
+            --type=json \
+            -p="[{\"op\":\"replace\",\"path\":\"/spec/overrides/components/$index/enabled\",\"value\":$desired}]"
+          echo "PATCHED: $component=$desired"
+        }
+
+        patch_component cnv-mtv-integrations true
+        patch_component fine-grained-rbac {{ (acm_virtualization_fine_grained_rbac_enabled | bool) | ternary('true', 'false') }}
+      args:
+        executable: /bin/bash
+      register: acm_virtualization_component_patch
+      changed_when: "'PATCHED:' in acm_virtualization_component_patch.stdout"
+
+    - name: Wait for MultiClusterHub virtualization reconciliation
+      ansible.builtin.shell: |
+        set -euo pipefail
+        mch_json="$(oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }} -o json)"
+        phase="$(jq -r '.status.phase // "Unknown"' <<<"$mch_json")"
+        cnv="$(jq -r '.spec.overrides.components[] | select(.name == "cnv-mtv-integrations") | .enabled' <<<"$mch_json")"
+        fgrbac="$(jq -r '.spec.overrides.components[] | select(.name == "fine-grained-rbac") | .enabled' <<<"$mch_json")"
+        echo "phase=$phase cnv-mtv-integrations=$cnv fine-grained-rbac=$fgrbac"
+        [[ "$phase" == "Running" ]]
+        [[ "$cnv" == "true" ]]
+        [[ "$fgrbac" == "{{ (acm_virtualization_fine_grained_rbac_enabled | bool) | ternary('true', 'false') }}" ]]
+      args:
+        executable: /bin/bash
+      register: acm_virtualization_mch_ready
+      changed_when: false
+      retries: "{{ ((acm_virtualization_wait_timeout_seconds | int) / (acm_virtualization_wait_poll_seconds | int)) | int }}"
+      delay: "{{ acm_virtualization_wait_poll_seconds | int }}"
+      until: acm_virtualization_mch_ready.rc == 0
+
+    - name: Remove obsolete ACM 2.15 CNV operator add-on objects on ACM 2.16
+      ansible.builtin.shell: |
+        set -euo pipefail
+        changed=false
+        for resource in \
+          clustermanagementaddon/kubevirt-hyperconverged-operator \
+          addontemplate/kubevirt-hyperconverged-operator; do
+          if oc get "$resource" >/dev/null 2>&1; then
+            oc delete "$resource"
+            changed=true
+          fi
+        done
+        if [[ "$changed" == "true" ]]; then
+          echo "CHANGED: removed obsolete ACM 2.15 kubevirt-hyperconverged-operator add-on objects"
+        else
+          echo "UNCHANGED: no obsolete ACM 2.15 CNV add-on objects found"
+        fi
+      args:
+        executable: /bin/bash
+      register: acm_virtualization_legacy_addon_cleanup
+      changed_when: "'CHANGED:' in acm_virtualization_legacy_addon_cleanup.stdout"
+      when: acm_virtualization_cleanup_legacy_215_addon | bool
+
+    - name: Label existing physical managed clusters for RHACM virtualization
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cluster="{{ item }}"
+        if ! oc get managedcluster "$cluster" >/dev/null 2>&1; then
+          echo "DEFERRED: managedcluster/$cluster does not exist yet"
+          exit 0
+        fi
+
+        current="$(oc get managedcluster "$cluster" -o json | jq -r '.metadata.labels["acm/cnv-operator-install"] // ""')"
+        if [[ "$current" == "true" ]]; then
+          echo "UNCHANGED: managedcluster/$cluster already has acm/cnv-operator-install=true"
+          exit 0
+        fi
+
+        oc label managedcluster "$cluster" acm/cnv-operator-install=true --overwrite
+        echo "LABELED: managedcluster/$cluster"
+      args:
+        executable: /bin/bash
+      loop: "{{ acm_virtualization_managed_clusters }}"
+      register: acm_virtualization_cluster_labels
+      changed_when: "'LABELED:' in acm_virtualization_cluster_labels.stdout"
+
+    - name: Wait for ACM 2.16 virtualization ClusterManagementAddOns
+      ansible.builtin.shell: |
+        set -euo pipefail
+        timeout={{ acm_virtualization_wait_timeout_seconds | int }}
+        poll={{ acm_virtualization_wait_poll_seconds | int }}
+        start=$(date +%s)
+        next_diagnostics=0
+        expected=( {{ acm_virtualization_expected_addons | join(' ') }} )
+
+        while true; do
+          now=$(date +%s)
+          elapsed=$((now - start))
+          missing=""
+
+          for addon in "${expected[@]}"; do
+            if ! oc get clustermanagementaddon "$addon" >/dev/null 2>&1; then
+              if [[ -n "$missing" ]]; then
+                missing+=" "
+              fi
+              missing+="$addon"
+            fi
+          done
+
+          if [[ -z "$missing" ]]; then
+            echo "READY: ACM 2.16 virtualization add-ons are present after ${elapsed}s: ${expected[*]}"
+            oc get clustermanagementaddon "${expected[@]}"
+            exit 0
+          fi
+
+          printf 'Waiting for ACM 2.16 virtualization add-ons: elapsed=%02dm%02ds missing=%s\n' \
+            $((elapsed / 60)) $((elapsed % 60)) "$missing"
+
+          if (( elapsed >= next_diagnostics )); then
+            echo
+            echo '# Current ClusterManagementAddOns'
+            oc get clustermanagementaddon 2>/dev/null || true
+            echo
+            echo '# MultiClusterHub virtualization component state'
+            oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }} -o json |
+              jq -r '.spec.overrides.components[] |
+                select(.name == "cnv-mtv-integrations" or .name == "fine-grained-rbac") |
+                [.name, (.enabled | tostring)] | @tsv' || true
+            echo
+            echo '# RHACM virtualization-related workloads'
+            oc get pods -A 2>/dev/null |
+              egrep -i 'mtv|forklift|kubevirt|hyperconverged|cnv' || true
+            echo
+            next_diagnostics=$((elapsed + 60))
+          fi
+
+          if (( elapsed >= timeout )); then
+            echo "ERROR: Timed out after ${timeout}s waiting for ACM 2.16 virtualization add-ons: $missing" >&2
+            echo "Expected only the ACM 2.16 add-ons: ${expected[*]}" >&2
+            exit 1
+          fi
+
+          sleep "$poll"
+        done
+      args:
+        executable: /bin/bash
+      register: acm_virtualization_addons
+      changed_when: false
+
+    - name: Show RHACM Fleet Virtualization status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# MultiClusterHub virtualization components'
+        oc -n {{ acm_namespace }} get multiclusterhub {{ acm_multiclusterhub_name }} -o json |
+          jq -r '.spec.overrides.components[] |
+            select(.name == "cnv-mtv-integrations" or .name == "fine-grained-rbac") |
+            [.name, (.enabled | tostring)] | @tsv'
+
+        echo
+        echo '# Virtualization ClusterManagementAddOns'
+        oc get clustermanagementaddon {{ acm_virtualization_expected_addons | join(' ') }}
+
+        echo
+        echo '# Target managed-cluster labels'
+        for cluster in {{ acm_virtualization_managed_clusters | join(' ') }}; do
+          if oc get managedcluster "$cluster" >/dev/null 2>&1; then
+            value="$(oc get managedcluster "$cluster" -o json | jq -r '.metadata.labels["acm/cnv-operator-install"] // ""')"
+            printf '%s\t%s\n' "$cluster" "${value:-not-set}"
+          else
+            printf '%s\t%s\n' "$cluster" 'not-created-yet'
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: acm_virtualization_status
+      changed_when: false
+
+    - name: Print RHACM Fleet Virtualization status
+      ansible.builtin.debug:
+        var: acm_virtualization_status.stdout_lines

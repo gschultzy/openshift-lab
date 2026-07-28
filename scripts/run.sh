@@ -93,3 +93,13 @@ run_playbook playbooks/00_preflight.yml
 configure_local_become_auth
 run_playbook playbooks/04_configure_ad_dns.yml
 run_hub_install_if_needed
+
+# Build or reconcile the complete management plane on the SNO hub. Keeping this
+# in run.sh means the shorter entry point produces a usable RHACM hub, not only
+# an installed OpenShift node.
+run_playbook playbooks/02_add_sno_extra_disk.yml
+run_playbook playbooks/05_install_lvm_storage.yml
+run_playbook playbooks/06_install_acm.yml
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
+KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
+run_playbook playbooks/06_enable_acm_virtualization.yml

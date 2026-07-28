@@ -88,6 +88,8 @@ run_hub_install_if_needed
 run_playbook playbooks/02_add_sno_extra_disk.yml
 run_playbook playbooks/05_install_lvm_storage.yml
 run_playbook playbooks/06_install_acm.yml
+# ACM creates MCE asynchronously after MultiClusterHub is applied. The repair script waits
+# for the MCE CRD and object before applying HCP topology settings.
 # Keep HCP globally enabled but do not host tenant control planes on the SNO hub.
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh

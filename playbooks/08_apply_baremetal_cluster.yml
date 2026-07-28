@@ -47,6 +47,67 @@
       loop: "{{ bm_nodes }}"
       when: item.enabled | default(true)
 
+    - name: Check whether the ClusterDeployment already exists
+      ansible.builtin.command: >-
+        oc -n {{ bm_cluster_name }} get clusterdeployment {{ bm_cluster_name }} -o json
+      register: bm_existing_clusterdeployment
+      changed_when: false
+      failed_when: false
+
+    - name: Preserve the one-way Hive installed state
+      ansible.builtin.set_fact:
+        bm_clusterdeployment_exists: "{{ bm_existing_clusterdeployment.rc == 0 }}"
+        bm_clusterdeployment_installed_value: >-
+          {{
+            (
+              bm_existing_clusterdeployment.rc == 0
+              and
+              ((bm_existing_clusterdeployment.stdout | from_json).spec.installed | default(false) | bool)
+            ) | bool
+          }}
+
+    - name: Read an existing managed cluster version
+      ansible.builtin.command: >-
+        oc get managedcluster {{ bm_cluster_name }}
+        -o jsonpath='{.metadata.labels.openshiftVersion}'
+      register: bm_existing_managedcluster_version_result
+      changed_when: false
+      failed_when: false
+      when: bm_clusterdeployment_installed_value | bool
+
+    - name: Store the existing managed cluster version
+      ansible.builtin.set_fact:
+        bm_existing_managedcluster_version: >-
+          {{ bm_existing_managedcluster_version_result.stdout | default('') | trim }}
+      when: bm_clusterdeployment_installed_value | bool
+
+    - name: Refuse to reuse an installed cluster from another OpenShift minor
+      ansible.builtin.assert:
+        that:
+          - >-
+            (bm_existing_managedcluster_version | default('') | length) == 0
+            or bm_existing_managedcluster_version == ocp_version
+            or bm_existing_managedcluster_version.startswith(ocp_version ~ '.')
+        fail_msg: >-
+          {{ bm_cluster_name }} is already installed as OpenShift
+          {{ bm_existing_managedcluster_version | default('UNKNOWN') }}, but this repository is pinned to
+          {{ ocp_release_version }}. Delete and rebuild that spoke with the matching site delete script
+          instead of reusing an installed cluster from a different minor release.
+      when: bm_clusterdeployment_installed_value | bool
+
+    - name: Show existing ClusterDeployment handling
+      ansible.builtin.debug:
+        msg:
+          - "ClusterDeployment exists: {{ bm_clusterdeployment_exists }}"
+          - "ClusterDeployment installed: {{ bm_clusterdeployment_installed_value }}"
+          - >-
+            {{
+              'Provisioning resources will be preserved and skipped because Hive installation is already complete.'
+              if (bm_clusterdeployment_installed_value | bool)
+              else 'Provisioning resources will be applied for a new or incomplete installation.'
+            }}
+          - "Existing managed cluster version: {{ bm_existing_managedcluster_version | default('not reported yet') }}"
+
     - name: Create rendered bare-metal manifest directory
       ansible.builtin.file:
         path: "{{ bm_rendered_dir }}"
@@ -72,7 +133,7 @@
         - 10-baremetalhosts.yaml.j2
         - 11-clustersetbinding.yaml.j2
 
-    - name: Apply bare-metal manifests in safe order
+    - name: Apply reusable hub and managed-cluster manifests
       ansible.builtin.command: "oc apply -f {{ bm_rendered_dir }}/{{ item }}"
       changed_when: true
       loop:
@@ -82,12 +143,26 @@
         - 01-pull-secret.yaml
         - 03-managedcluster.yaml
         - 04-klusterletaddonconfig.yaml
+
+    - name: Apply installation-time bare-metal manifests
+      ansible.builtin.command: "oc apply -f {{ bm_rendered_dir }}/{{ item }}"
+      changed_when: true
+      loop:
         - 05-clusterdeployment.yaml
         - 06-agentclusterinstall.yaml
         - 07-infraenv.yaml
         - 08-nmstateconfigs.yaml
         - 09-bmc-secrets.yaml
         - 10-baremetalhosts.yaml
+      when: not (bm_clusterdeployment_installed_value | bool)
+
+    - name: Explain why installed provisioning resources were not reapplied
+      ansible.builtin.debug:
+        msg: >-
+          {{ bm_cluster_name }} is already installed. Hive does not allow spec.installed to move
+          from true back to false, so ClusterDeployment, AgentClusterInstall, InfraEnv, NMStateConfig,
+          BMC Secret and BareMetalHost provisioning manifests were intentionally preserved.
+      when: bm_clusterdeployment_installed_value | bool
 
     - name: Wait for InfraEnv ISO URL to be generated
       ansible.builtin.command: >-
@@ -98,9 +173,11 @@
       retries: 60
       delay: 20
       until: infraenv_iso.stdout | length > 0
+      when: not (bm_clusterdeployment_installed_value | bool)
 
     - name: Show InfraEnv ISO URL status
       ansible.builtin.debug:
         msg:
           - "InfraEnv ISO is ready. ACM/BMO should now mount it by Redfish virtual media through each BareMetalHost."
           - "Namespace: {{ bm_cluster_name }}"
+      when: not (bm_clusterdeployment_installed_value | bool)

@@ -11,6 +11,7 @@ export KUBECONFIG
 MCE_NAME="${MCE_NAME:-$(inventory_value mce_name)}"
 MCH_NAMESPACE="${ACM_NAMESPACE:-$(inventory_value acm_namespace)}"
 MCH_NAME="${MCH_NAME:-$(inventory_value acm_multiclusterhub_name)}"
+ACM_SUBSCRIPTION_NAME="${ACM_SUBSCRIPTION_NAME:-$(inventory_value acm_subscription_name)}"
 LOCAL_CLUSTER_NAME="${MCE_LOCAL_CLUSTER_NAME:-$(inventory_value mce_local_cluster_name)}"
 HYPERSHIFT_ADDON_NAME="${MCE_HYPERSHIFT_ADDON_NAME:-$(inventory_value mce_hypershift_addon_name)}"
 HYPERSHIFT_ADDON_WORK_NAMESPACE="${MCE_HYPERSHIFT_ADDON_WORK_NAMESPACE:-$(inventory_value mce_hypershift_addon_work_namespace)}"
@@ -21,6 +22,8 @@ CLEANUP_GRACE="${MCE_LOCAL_ADDON_CLEANUP_GRACE_SECONDS:-$(inventory_value mce_lo
 ADDON_DELETE_TIMEOUT="${MCE_LOCAL_ADDON_DELETE_TIMEOUT_SECONDS:-$(inventory_value mce_local_addon_delete_timeout_seconds)}"
 TIMEOUT_SECONDS="${MCE_REPAIR_TIMEOUT_SECONDS:-$(inventory_value mce_repair_timeout_seconds)}"
 POLL_SECONDS="${MCE_REPAIR_POLL_SECONDS:-$(inventory_value mce_repair_poll_seconds)}"
+INSTALL_TIMEOUT_SECONDS="${MCE_INSTALL_TIMEOUT_SECONDS:-$(inventory_value mce_install_timeout_seconds)}"
+INSTALL_POLL_SECONDS="${MCE_INSTALL_POLL_SECONDS:-$(inventory_value mce_install_poll_seconds)}"
 
 truthy() {
   case "${1:-}" in
@@ -33,7 +36,7 @@ json_bool() {
   if truthy "$1"; then printf 'true'; else printf 'false'; fi
 }
 
-for cmd in oc jq date sleep; do
+for cmd in oc jq date sleep awk; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required command: $cmd" >&2; exit 1; }
 done
 [[ -s "$KUBECONFIG" ]] || { echo "Hub kubeconfig not found: $KUBECONFIG" >&2; exit 1; }
@@ -43,22 +46,65 @@ if ! oc get clusterversion version >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! oc get crd multiclusterengines.multicluster.openshift.io >/dev/null 2>&1; then
-  echo "The MultiClusterEngine CRD is not installed yet. Install ACM first." >&2
-  exit 1
-fi
+echo
+echo "Waiting for ACM to install MultiCluster Engine"
+echo "  MCE CRD:        multiclusterengines.multicluster.openshift.io"
+echo "  MCE object:     $MCE_NAME"
+echo "  Timeout:        ${INSTALL_TIMEOUT_SECONDS}s"
+echo "  Poll interval:  ${INSTALL_POLL_SECONDS}s"
 
-if ! oc get mce "$MCE_NAME" >/dev/null 2>&1; then
-  echo "Waiting for MultiClusterEngine/$MCE_NAME to be created..."
-  for _ in $(seq 1 120); do
-    oc get mce "$MCE_NAME" >/dev/null 2>&1 && break
-    sleep 5
-  done
-fi
-oc get mce "$MCE_NAME" >/dev/null 2>&1 || {
-  echo "MultiClusterEngine/$MCE_NAME was not created." >&2
-  exit 1
-}
+install_start="$(date +%s)"
+install_poll=0
+while ! oc get crd multiclusterengines.multicluster.openshift.io >/dev/null 2>&1; do
+  now="$(date +%s)"
+  elapsed=$((now - install_start))
+  mch_phase="$(oc -n "$MCH_NAMESPACE" get mch "$MCH_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  acm_csv="$(oc -n "$MCH_NAMESPACE" get subscriptions.operators.coreos.com "$ACM_SUBSCRIPTION_NAME" -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
+  mce_sub="$(oc -n multicluster-engine get subscriptions.operators.coreos.com multicluster-engine -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
+  printf '[%s] elapsed=%02dm%02ds MCH=%s ACM-CSV=%s MCE-CSV=%s MCE-CRD=absent\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$((elapsed/60))" "$((elapsed%60))" \
+    "${mch_phase:-Pending}" "${acm_csv:-not-selected}" "${mce_sub:-not-selected}"
+
+  if (( elapsed >= INSTALL_TIMEOUT_SECONDS )); then
+    echo "Timed out waiting for the MultiClusterEngine CRD." >&2
+    echo "ACM may still be installing MCE. Current operator state:" >&2
+    oc -n "$MCH_NAMESPACE" get mch "$MCH_NAME" -o wide >&2 2>/dev/null || true
+    oc -n "$MCH_NAMESPACE" get subscriptions.operators.coreos.com,clusterserviceversions.operators.coreos.com >&2 2>/dev/null || true
+    oc -n multicluster-engine get subscriptions.operators.coreos.com,clusterserviceversions.operators.coreos.com >&2 2>/dev/null || true
+    oc get pods -A | awk '$1 ~ /^(open-cluster-management|multicluster-engine)/' >&2 2>/dev/null || true
+    exit 1
+  fi
+
+  install_poll=$((install_poll + 1))
+  if (( install_poll % 8 == 0 )); then
+    oc get events -A --field-selector type=Warning --sort-by=.lastTimestamp 2>/dev/null | tail -8 || true
+  fi
+  sleep "$INSTALL_POLL_SECONDS"
+done
+
+echo "MultiClusterEngine CRD is installed. Waiting for MultiClusterEngine/$MCE_NAME..."
+while ! oc get mce "$MCE_NAME" >/dev/null 2>&1; do
+  now="$(date +%s)"
+  elapsed=$((now - install_start))
+  mce_csv="$(oc -n multicluster-engine get subscriptions.operators.coreos.com multicluster-engine -o jsonpath='{.status.installedCSV}' 2>/dev/null || true)"
+  mce_csv_phase="unknown"
+  if [[ -n "$mce_csv" ]]; then
+    mce_csv_phase="$(oc -n multicluster-engine get clusterserviceversions.operators.coreos.com "$mce_csv" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  fi
+  printf '[%s] elapsed=%02dm%02ds MCE-CRD=present MCE-object=absent MCE-CSV=%s(%s)\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$((elapsed/60))" "$((elapsed%60))" \
+    "${mce_csv:-not-selected}" "${mce_csv_phase:-unknown}"
+
+  if (( elapsed >= INSTALL_TIMEOUT_SECONDS )); then
+    echo "Timed out waiting for MultiClusterEngine/$MCE_NAME to be created." >&2
+    oc -n "$MCH_NAMESPACE" get mch "$MCH_NAME" -o yaml >&2 2>/dev/null || true
+    oc -n multicluster-engine get subscriptions.operators.coreos.com,clusterserviceversions.operators.coreos.com >&2 2>/dev/null || true
+    exit 1
+  fi
+  sleep "$INSTALL_POLL_SECONDS"
+done
+
+echo "MultiClusterEngine/$MCE_NAME exists. Continuing HCP topology configuration."
 
 if ! truthy "$LOCAL_HOSTING_ENABLED" && oc get crd hostedclusters.hypershift.openshift.io >/dev/null 2>&1; then
   local_hcs="$(oc get hostedcluster -A --no-headers 2>/dev/null || true)"

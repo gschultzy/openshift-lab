@@ -489,3 +489,19 @@ set:
 ```bash
 export ANSIBLE_BECOME_PASSWORD_FILE="$HOME/.openshift-lab-become-password"
 ```
+
+### ACM says the MultiClusterEngine CRD is not installed yet
+
+`MultiClusterHub` installs MultiCluster Engine asynchronously. The full runner now waits up to
+`mce_install_timeout_seconds` for the MCE CRD, MCE operator CSV and
+`MultiClusterEngine/multiclusterengine` object before applying HCP topology settings.
+
+The default values are:
+
+```yaml
+mce_install_timeout_seconds: 2400
+mce_install_poll_seconds: 15
+```
+
+Do not delete the SNO or `MultiClusterHub` when this is only an installation delay. The runner
+prints the ACM/MCE CSV and warning-event status while it waits.

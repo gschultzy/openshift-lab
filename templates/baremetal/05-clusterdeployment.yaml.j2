@@ -8,7 +8,7 @@ metadata:
 spec:
   baseDomain: {{ bm_base_domain }}
   clusterName: {{ bm_cluster_name }}
-  installed: false
+  installed: {{ bm_clusterdeployment_installed_value | default(false) | bool | lower }}
   platform:
     agentBareMetal:
       agentSelector:

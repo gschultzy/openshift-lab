@@ -67,6 +67,28 @@
       loop_control:
         label: "{{ item.display_name }}"
 
+    - name: Grant the Portworx Stork service account access to its required SCC
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ item.kubeconfig_file | quote }}
+        adm policy add-scc-to-user hostmount-anyuid
+        system:serviceaccount:{{ portworx_namespace }}:stork
+      changed_when: true
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
+
+    - name: Verify the Portworx Stork service account can use hostmount-anyuid
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ item.kubeconfig_file | quote }}
+        auth can-i use scc/hostmount-anyuid
+        --as=system:serviceaccount:{{ portworx_namespace }}:stork
+      changed_when: false
+      register: portworx_stork_scc_access
+      failed_when: portworx_stork_scc_access.stdout | trim != 'yes'
+      loop: "{{ portworx_pure_selected_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
+
     - name: Wait for selected master MachineConfigPools to become healthy
       ansible.builtin.shell: |
         set -euo pipefail

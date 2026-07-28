@@ -1,142 +1,176 @@
 ---
-- name: Ensure HyperShift operator and CRDs exist on Site-A and Site-B
+- name: Wait for RHACM HyperShift add-on and operator on Site-A and Site-B
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Skip direct HyperShift bootstrap when disabled
-      ansible.builtin.debug:
-        msg: "Direct HyperShift bootstrap is disabled; relying only on RHACM hypershift-addon."
-      when: not (hcp_direct_hypershift_install | default(true) | bool)
-
     - name: Confirm hub kubeconfig exists
       ansible.builtin.stat:
         path: "{{ hub_kubeconfig }}"
       register: hub_kubeconfig_stat
-      when: hcp_direct_hypershift_install | default(true) | bool
 
     - name: Stop if hub kubeconfig is missing
       ansible.builtin.fail:
         msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
-      when:
-        - hcp_direct_hypershift_install | default(true) | bool
-        - not hub_kubeconfig_stat.stat.exists
+      when: not hub_kubeconfig_stat.stat.exists
 
-    - name: Extract spoke kubeconfigs from RHACM hub
+    - name: Extract current spoke kubeconfigs from the RHACM hub
       ansible.builtin.shell: |
         set -euo pipefail
         mkdir -p {{ site_a_kubeconfig_file | dirname }} {{ site_b_kubeconfig_file | dirname }}
-        oc -n {{ bm_cluster_name }} get secret {{ bm_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file }}
-        chmod 0600 {{ site_a_kubeconfig_file }}
-        oc -n {{ site_b_cluster_name }} get secret {{ site_b_cluster_name }}-admin-kubeconfig -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file }}
-        chmod 0600 {{ site_b_kubeconfig_file }}
+
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ bm_cluster_name }} \
+          get secret {{ bm_cluster_name }}-admin-kubeconfig \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_a_kubeconfig_file | quote }}
+        chmod 0600 {{ site_a_kubeconfig_file | quote }}
+
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ site_b_cluster_name }} \
+          get secret {{ site_b_cluster_name }}-admin-kubeconfig \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ site_b_kubeconfig_file | quote }}
+        chmod 0600 {{ site_b_kubeconfig_file | quote }}
       args:
         executable: /bin/bash
-      environment:
-        KUBECONFIG: "{{ hub_kubeconfig }}"
       changed_when: true
-      when: hcp_direct_hypershift_install | default(true) | bool
 
-    - name: Install hcp CLI for direct HyperShift bootstrap if needed
-      ansible.builtin.command: >-
-        {{ repo_root }}/scripts/install-hcp-cli-from-cluster.sh
-        {{ hub_kubeconfig }}
-        {{ site_a_hcp_cli_path }}
-        {{ site_a_kubeconfig_file }}
-        {{ site_b_kubeconfig_file }}
-      changed_when: true
-      when: hcp_direct_hypershift_install | default(true) | bool
-
-    - name: Ensure HyperShift operator is usable on each spoke
+    - name: Wait for HyperShift add-on, CRDs and operator on each hosting cluster
       ansible.builtin.shell: |
         set -euo pipefail
-        label="{{ item.name }}"
-        K="{{ item.kubeconfig_file }}"
-        HCP="{{ item.hcp_cli_path }}"
-        tmpdir="$(mktemp -d)"
-        trap 'rm -rf "$tmpdir"' EXIT
 
-        echo "# ${label}: ensure add-on and HyperShift namespaces exist"
-        oc --kubeconfig "$K" create namespace open-cluster-management-agent-addon-discovery --dry-run=client -o yaml | oc --kubeconfig "$K" apply -f -
-        oc --kubeconfig "$K" create namespace hypershift --dry-run=client -o yaml | oc --kubeconfig "$K" apply -f -
+        label={{ item.name | quote }}
+        cluster={{ item.cluster_name | quote }}
+        spoke_kubeconfig={{ item.kubeconfig_file | quote }}
+        hub_kubeconfig={{ hub_kubeconfig | quote }}
+        addon={{ mce_hypershift_addon_name | default('hypershift-addon') | quote }}
+        addon_namespace={{ mce_hypershift_addon_work_namespace | default('open-cluster-management-agent-addon-discovery') | quote }}
+        timeout={{ hcp_hypershift_addon_wait_timeout_seconds | default(1800) | int }}
+        poll={{ hcp_hypershift_addon_wait_poll_seconds | default(15) | int }}
+        start=$(date +%s)
+        last_report=0
 
-        check_hypershift_ready() {
-          oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io >/dev/null 2>&1 && \
-          oc --kubeconfig "$K" -n hypershift get deployment/operator >/dev/null 2>&1 && \
-          oc --kubeconfig "$K" -n hypershift rollout status deployment/operator --timeout=20s >/dev/null 2>&1
-        }
+        echo "# ${label}: validating spoke kubeconfig"
+        server=$(oc --kubeconfig "$spoke_kubeconfig" whoami --show-server)
+        version=$(oc --kubeconfig "$spoke_kubeconfig" get clusterversion version -o jsonpath='{.status.desired.version}')
+        nodes=$(oc --kubeconfig "$spoke_kubeconfig" get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        echo "${label}: server=${server} version=${version} nodes=${nodes}"
 
-        echo "# ${label}: current HyperShift status"
-        oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io 2>/dev/null || true
-        oc --kubeconfig "$K" -n hypershift get deployment,pods 2>/dev/null || true
-
-        if check_hypershift_ready; then
-          echo "${label}: HyperShift operator and CRDs are already usable."
-          exit 0
-        fi
-
-        echo "${label}: RHACM hypershift-addon has not produced usable CRDs/operator yet; bootstrapping HyperShift directly with hcp install render."
-
-        render="${tmpdir}/hypershift-install.yaml"
-        rendered=false
-
-        try_render() {
-          local description="$1"
-          shift
-          echo "# ${label}: trying ${description}"
-          if KUBECONFIG="$K" "$HCP" "$@" > "$render" 2>"${tmpdir}/render.err"; then
-            if [ -s "$render" ] && grep -Eq '^(apiVersion|kind):' "$render"; then
-              rendered=true
-              return 0
-            fi
-          fi
-          cat "${tmpdir}/render.err" >&2 || true
-          return 1
-        }
-
-        try_render "hcp install render --format=yaml" install render --format=yaml || \
-        try_render "hcp install render --namespace hypershift --format=yaml" install render --namespace hypershift --format=yaml || \
-        try_render "hcp install render --hypershift-namespace hypershift --format=yaml" install render --hypershift-namespace hypershift --format=yaml || true
-
-        if [ "$rendered" != "true" ]; then
-          echo "ERROR: Could not render HyperShift install manifests with ${HCP}." >&2
-          echo "Run '${HCP} install render --help' on the bastion to confirm the supported flags." >&2
+        if [[ "$server" != *"api.${cluster}.{{ base_domain }}"* ]]; then
+          echo "ERROR: ${label} kubeconfig points to the wrong API server: ${server}" >&2
+          echo "Expected api.${cluster}.{{ base_domain }}" >&2
           exit 1
         fi
 
-        echo "# ${label}: applying rendered HyperShift install manifests"
-        oc --kubeconfig "$K" apply -f "$render"
+        echo "# ${label}: ensure the add-on target namespace exists"
+        oc --kubeconfig "$spoke_kubeconfig" create namespace "$addon_namespace" \
+          --dry-run=client -o yaml | oc --kubeconfig "$spoke_kubeconfig" apply -f -
 
-        echo "# ${label}: wait for HyperShift CRDs"
-        for i in $(seq 1 60); do
-          if oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io >/dev/null 2>&1; then
-            break
+        # Touch the hub resources after the target namespace exists so the add-on
+        # controller and ManifestWork controller promptly reconcile stale work.
+        retry_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        oc --kubeconfig "$hub_kubeconfig" -n "$cluster" annotate \
+          managedclusteraddon "$addon" "openshift-lab/retry-at=${retry_at}" \
+          --overwrite >/dev/null 2>&1 || true
+        oc --kubeconfig "$hub_kubeconfig" -n "$cluster" annotate \
+          manifestwork "addon-${addon}-deploy-0" "openshift-lab/retry-at=${retry_at}" \
+          --overwrite >/dev/null 2>&1 || true
+
+        addon_condition() {
+          local condition="$1"
+          oc --kubeconfig "$hub_kubeconfig" -n "$cluster" \
+            get managedclusteraddon "$addon" \
+            -o jsonpath="{.status.conditions[?(@.type=='${condition}')].status}" \
+            2>/dev/null || true
+        }
+
+        hypershift_ready() {
+          oc --kubeconfig "$spoke_kubeconfig" \
+            get crd hostedclusters.hypershift.openshift.io \
+                    nodepools.hypershift.openshift.io >/dev/null 2>&1 && \
+          oc --kubeconfig "$spoke_kubeconfig" -n hypershift \
+            get deployment operator >/dev/null 2>&1 && \
+          [[ "$(oc --kubeconfig "$spoke_kubeconfig" -n hypershift \
+            get deployment operator -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)" =~ ^[1-9][0-9]*$ ]]
+        }
+
+        print_diagnostics() {
+          echo
+          echo "===== ${label} HyperShift add-on diagnostics ====="
+          echo "# ManagedClusterAddOn"
+          oc --kubeconfig "$hub_kubeconfig" -n "$cluster" \
+            get managedclusteraddon "$addon" -o wide || true
+          oc --kubeconfig "$hub_kubeconfig" -n "$cluster" \
+            get managedclusteraddon "$addon" -o json 2>/dev/null | \
+            jq -r '.status.conditions[]? | [.type,.status,.reason,.message] | @tsv' || true
+
+          echo "# ManifestWork"
+          oc --kubeconfig "$hub_kubeconfig" -n "$cluster" \
+            get manifestwork "addon-${addon}-deploy-0" -o json 2>/dev/null | \
+            jq -r '.status.conditions[]? | [.type,.status,.reason,.message] | @tsv' || true
+
+          echo "# Spoke add-on namespace"
+          oc --kubeconfig "$spoke_kubeconfig" -n "$addon_namespace" \
+            get deployment,pod,job,serviceaccount 2>/dev/null || true
+
+          echo "# HyperShift namespace"
+          oc --kubeconfig "$spoke_kubeconfig" -n hypershift \
+            get deployment,pod 2>/dev/null || true
+
+          echo "# Recent spoke warnings"
+          oc --kubeconfig "$spoke_kubeconfig" get events -A \
+            --field-selector type=Warning --sort-by=.lastTimestamp 2>/dev/null | tail -30 || true
+          echo "=================================================="
+          echo
+        }
+
+        echo "# ${label}: waiting for RHACM hypershift-addon and HyperShift operator"
+        while true; do
+          now=$(date +%s)
+          elapsed=$((now - start))
+          available=$(addon_condition Available)
+          degraded=$(addon_condition Degraded)
+          progressing=$(addon_condition Progressing)
+
+          if [[ "$available" == "True" ]] && hypershift_ready; then
+            echo "${label}: hypershift-addon Available=True and HyperShift operator is ready after ${elapsed}s."
+            oc --kubeconfig "$spoke_kubeconfig" \
+              get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io
+            oc --kubeconfig "$spoke_kubeconfig" -n hypershift get deployment,pods
+            exit 0
           fi
-          echo "Waiting for HyperShift CRDs on ${label}: ${i}/60"
-          sleep 10
+
+          printf '[%s] %s elapsed=%ss addon Available=%s Degraded=%s Progressing=%s operator=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" "$label" "$elapsed" \
+            "${available:-Unknown}" "${degraded:-Unknown}" "${progressing:-Unknown}" \
+            "$(hypershift_ready && echo ready || echo waiting)"
+
+          if (( elapsed >= timeout )); then
+            echo "ERROR: ${label} HyperShift add-on/operator did not become ready within ${timeout}s." >&2
+            print_diagnostics
+            exit 1
+          fi
+
+          if (( elapsed - last_report >= 120 )); then
+            print_diagnostics
+            last_report=$elapsed
+          fi
+
+          sleep "$poll"
         done
-
-        echo "# ${label}: wait for HyperShift operator rollout"
-        oc --kubeconfig "$K" -n hypershift rollout status deployment/operator --timeout=20m
-
-        echo "# ${label}: final HyperShift status"
-        oc --kubeconfig "$K" get crd hostedclusters.hypershift.openshift.io nodepools.hypershift.openshift.io
-        oc --kubeconfig "$K" -n hypershift get deployment,pods
       args:
         executable: /bin/bash
       loop:
         - name: Site-A
+          cluster_name: "{{ bm_cluster_name }}"
           kubeconfig_file: "{{ site_a_kubeconfig_file }}"
-          hcp_cli_path: "{{ site_a_hcp_cli_path }}"
         - name: Site-B
+          cluster_name: "{{ site_b_cluster_name }}"
           kubeconfig_file: "{{ site_b_kubeconfig_file }}"
-          hcp_cli_path: "{{ site_b_hcp_cli_path }}"
       loop_control:
         label: "{{ item.name }}"
-      register: hypershift_operator_bootstrap
-      changed_when: "'bootstrapping HyperShift directly' in hypershift_operator_bootstrap.stdout"
-      when: hcp_direct_hypershift_install | default(true) | bool
+      register: hypershift_addon_wait
+      changed_when: false
 
-    - name: Print HyperShift bootstrap output
+    - name: Print HyperShift add-on readiness results
       ansible.builtin.debug:
-        var: hypershift_operator_bootstrap.results
-      when: hcp_direct_hypershift_install | default(true) | bool
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ hypershift_addon_wait.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

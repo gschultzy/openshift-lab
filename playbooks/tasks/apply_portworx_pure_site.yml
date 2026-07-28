@@ -1,20 +1,33 @@
 ---
-- name: "Reset generated token variables for {{ portworx_site.display_name }}"
-  ansible.builtin.set_fact:
-    portworx_site_generated_token_vars: {}
-  no_log: true
-
 - name: "Check for generated FlashArray API token for {{ portworx_site.display_name }}"
   ansible.builtin.stat:
     path: "{{ portworx_site.generated_token_file }}"
   register: portworx_site_generated_token_stat
   no_log: true
 
-- name: "Load generated FlashArray API token for {{ portworx_site.display_name }}"
-  ansible.builtin.include_vars:
-    file: "{{ portworx_site.generated_token_file }}"
-    name: portworx_site_generated_token_vars
+# Do not initialize this variable with set_fact before include_vars. set_fact has
+# higher precedence than include_vars and would permanently mask the token read
+# from the generated file. Slurp and parse the file, then assign the real value
+# so each site gets fresh site-specific data during the include_tasks loop.
+- name: "Read generated FlashArray API token file for {{ portworx_site.display_name }}"
+  ansible.builtin.slurp:
+    src: "{{ portworx_site.generated_token_file }}"
+  register: portworx_site_generated_token_file
   when: portworx_site_generated_token_stat.stat.exists
+  no_log: true
+
+- name: "Load generated FlashArray API token for {{ portworx_site.display_name }}"
+  ansible.builtin.set_fact:
+    portworx_site_generated_token_vars: >-
+      {{
+        (
+          portworx_site_generated_token_file.content
+          | b64decode
+          | from_yaml
+        )
+        if portworx_site_generated_token_stat.stat.exists
+        else {}
+      }}
   no_log: true
 
 - name: "Select effective FlashArray API token for {{ portworx_site.display_name }}"
@@ -34,13 +47,12 @@
       but no API token is available for {{ portworx_site.flasharray_name }}
       ({{ portworx_site.flasharray_mgmt_endpoint }}).
 
-      Add the site-specific password/token to Ansible Vault or generate both tokens:
-        ansible-vault edit inventories/env/group_vars/all/vault.yml
-        ./scripts/create-pure-api-token.sh
+      hcp-create.sh automatically checks these sources in order:
+        1. vault_{{ portworx_site.name | replace('-', '_') }}_pure_flasharray_api_token
+        2. {{ portworx_site.generated_token_file }}
 
-      Expected Vault variables:
-        vault_{{ portworx_site.name | replace('-', '_') }}_pure_flasharray_password
-        vault_{{ portworx_site.name | replace('-', '_') }}_pure_flasharray_api_token
+      The generated token file exists: {{ portworx_site_generated_token_stat.stat.exists | default(false) }}
+      When it exists, verify that it contains a non-empty pure_flasharray_api_token value.
   when:
     - portworx_pure_apply_storagecluster | default(true) | bool
     - portworx_site_effective_api_token | default('') | length == 0
@@ -75,6 +87,28 @@
     pure_flasharray_realm: "{{ portworx_site.realm | default('') }}"
     pure_flasharray_pod: "{{ portworx_site.pod | default('') }}"
   no_log: true
+
+- name: "Validate RHACM Policy namespace/name limit for {{ portworx_site.display_name }}"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (portworx_pure_policy_namespace | length)
+        + (item | length)
+        + (portworx_pure_policy_suffix | length)
+        <= 62
+    fail_msg: >-
+      RHACM rejects Policy {{ portworx_pure_policy_namespace }}/{{ item }}{{ portworx_pure_policy_suffix }}
+      because the combined namespace and policy-name length exceeds 62 characters.
+    quiet: true
+  loop:
+    - portworx-pure-node-prep
+    - portworx-operator
+    - portworx-pure-secret
+    - portworx-pure-storagecluster
+    - portworx-openshift-console-plugin
+    - portworx-hcp-storageclasses
+  loop_control:
+    label: "{{ item }}{{ portworx_pure_policy_suffix }}"
 
 - name: "Create rendered policy directory for {{ portworx_site.display_name }}"
   ansible.builtin.file:

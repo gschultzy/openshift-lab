@@ -56,10 +56,154 @@
 
         echo "# {{ item.name }} cluster and Portworx status"
         oc --kubeconfig "$K" get clusterversion
-        oc --kubeconfig "$K" -n {{ portworx_namespace }} get storagecluster {{ portworx_storagecluster_name }}
-        phase=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get storagecluster {{ portworx_storagecluster_name }} -o jsonpath='{.status.phase}')
-        if [ "$phase" != "Running" ]; then
-          echo "ERROR: Portworx StorageCluster is not Running on {{ item.name }}: $phase" >&2
+
+        # Portworx 3.6 annotates deployment/stork with
+        # openshift.io/required-scc=hostmount-anyuid. On a clean OpenShift
+        # cluster the stork service account might not yet have permission to
+        # use that SCC, which prevents the ReplicaSet from creating any pods.
+        # px-csi-ext uses schedulerName=stork, so this otherwise deadlocks all
+        # pxd.portworx.com PVC provisioning. Grant and verify the exact SCC
+        # required by the workload before waiting for CSI readiness.
+        STORK_USER="system:serviceaccount:{{ portworx_namespace }}:stork"
+        echo "# Ensure ${STORK_USER} can use SCC hostmount-anyuid"
+        oc --kubeconfig "$K" adm policy add-scc-to-user hostmount-anyuid "$STORK_USER" >/dev/null
+        if [ "$(oc --kubeconfig "$K" auth can-i use scc/hostmount-anyuid --as="$STORK_USER")" != "yes" ]; then
+          echo "ERROR: ${STORK_USER} still cannot use SCC hostmount-anyuid on {{ item.name }}." >&2
+          exit 1
+        fi
+        echo "OK: Stork SCC permission is present"
+
+        PX_TIMEOUT={{ hcp_portworx_wait_timeout_seconds | default(3600) | int }}
+        PX_POLL={{ hcp_portworx_wait_poll_seconds | default(30) | int }}
+        PX_CRD=storageclusters.core.libopenstorage.org
+        PX_RESOURCE=storagecluster.core.libopenstorage.org
+        start=$(date +%s)
+        last_detail=0
+
+        echo "Waiting up to ${PX_TIMEOUT}s for the Portworx Operator CRD, StorageCluster and phase=Running on {{ item.name }}..."
+        while true; do
+          now=$(date +%s)
+          elapsed=$((now - start))
+          crd=absent
+          object=absent
+          phase=missing
+
+          if oc --kubeconfig "$K" get crd "$PX_CRD" >/dev/null 2>&1; then
+            crd=present
+            if oc --kubeconfig "$K" -n {{ portworx_namespace }} get "$PX_RESOURCE" {{ portworx_storagecluster_name }} >/dev/null 2>&1; then
+              object=present
+              phase=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get "$PX_RESOURCE" {{ portworx_storagecluster_name }} -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              phase=${phase:-pending}
+            fi
+          fi
+
+          printf '[%s] elapsed=%02dm%02ds crd=%s storagecluster=%s phase=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" "$((elapsed/60))" "$((elapsed%60))" "$crd" "$object" "$phase"
+
+          if [ "$crd" = present ] && [ "$object" = present ] && [ "$phase" = Running ]; then
+            echo "Portworx StorageCluster is Running on {{ item.name }}."
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get "$PX_RESOURCE" {{ portworx_storagecluster_name }}
+            break
+          fi
+
+          if [ "$elapsed" -ge "$PX_TIMEOUT" ]; then
+            echo "ERROR: Portworx did not become ready on {{ item.name }} within ${PX_TIMEOUT}s." >&2
+            echo >&2
+            echo '# Portworx OLM resources' >&2
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get subscription.operators.coreos.com,clusterserviceversion.operators.coreos.com,installplan.operators.coreos.com,pods -o wide 2>&1 || true
+            echo >&2
+            echo '# Portworx CRDs' >&2
+            oc --kubeconfig "$K" get crd 2>/dev/null | grep -E 'libopenstorage|portworx' || true
+            echo >&2
+            echo '# Portworx StorageCluster details' >&2
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get "$PX_RESOURCE" {{ portworx_storagecluster_name }} -o yaml 2>&1 || true
+            echo >&2
+            echo '# Recent Portworx events' >&2
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get events --sort-by=.lastTimestamp 2>&1 | tail -100 || true
+            exit 1
+          fi
+
+          # Every two minutes, print enough detail to distinguish OLM delay,
+          # missing CRD, policy delay and an unhealthy StorageCluster.
+          if [ $((elapsed - last_detail)) -ge 120 ]; then
+            last_detail=$elapsed
+            echo
+            echo '# Portworx progress details'
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get subscription.operators.coreos.com,clusterserviceversion.operators.coreos.com,pods -o wide 2>/dev/null || true
+            if [ "$object" = present ]; then
+              oc --kubeconfig "$K" -n {{ portworx_namespace }} get "$PX_RESOURCE" {{ portworx_storagecluster_name }} -o wide 2>/dev/null || true
+            fi
+            echo
+          fi
+
+          sleep "$PX_POLL"
+        done
+
+        echo
+        echo "# Wait for Stork extender and Portworx CSI controller on {{ item.name }}"
+        CSI_START=$(date +%s)
+        CSI_LAST_DETAIL=0
+        STORK_RESTARTED=false
+        CSI_RESTARTED=false
+        while true; do
+          now=$(date +%s)
+          csi_elapsed=$((now - CSI_START))
+
+          stork_desired=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get deployment stork -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
+          stork_available=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get deployment stork -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
+          stork_available=${stork_available:-0}
+          csi_desired=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get deployment px-csi-ext -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
+          csi_available=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get deployment px-csi-ext -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
+          csi_available=${csi_available:-0}
+          stork_endpoints=$(oc --kubeconfig "$K" -n {{ portworx_namespace }} get endpoints stork-service -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+
+          printf '[%s] elapsed=%02dm%02ds stork=%s/%s endpoints=%s px-csi-ext=%s/%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" "$((csi_elapsed/60))" "$((csi_elapsed%60))" \
+            "$stork_available" "$stork_desired" "${stork_endpoints:-none}" "$csi_available" "$csi_desired"
+
+          if [ "$stork_desired" -gt 0 ] && [ "$stork_available" -eq "$stork_desired" ] && \
+             [ -n "$stork_endpoints" ] && [ "$csi_desired" -gt 0 ] && [ "$csi_available" -eq "$csi_desired" ]; then
+            echo "Stork and px-csi-ext are ready on {{ item.name }}."
+            break
+          fi
+
+          if [ "$stork_desired" -gt 0 ] && [ "$stork_available" -lt "$stork_desired" ] && [ "$STORK_RESTARTED" = false ]; then
+            echo "Restarting deployment/stork after SCC repair..."
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} rollout restart deployment/stork >/dev/null
+            STORK_RESTARTED=true
+          fi
+
+          if [ -n "$stork_endpoints" ] && [ "$csi_desired" -gt 0 ] && [ "$csi_available" -lt "$csi_desired" ] && [ "$CSI_RESTARTED" = false ]; then
+            echo "Restarting deployment/px-csi-ext now that stork-service has endpoints..."
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} rollout restart deployment/px-csi-ext >/dev/null
+            CSI_RESTARTED=true
+          fi
+
+          if [ "$csi_elapsed" -ge "$PX_TIMEOUT" ]; then
+            echo "ERROR: Stork/px-csi-ext did not become ready on {{ item.name }} within ${PX_TIMEOUT}s." >&2
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get deployment stork stork-scheduler px-csi-ext -o wide 2>&1 || true
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods -o wide 2>&1 | egrep 'stork|px-csi-ext' || true
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get endpoints stork-service -o yaml 2>&1 || true
+            for rs in $(oc --kubeconfig "$K" -n {{ portworx_namespace }} get rs -l name=stork -o name 2>/dev/null); do
+              oc --kubeconfig "$K" -n {{ portworx_namespace }} describe "$rs" 2>&1 | sed -n '/Events:/,$p' || true
+            done
+            for pod in $(oc --kubeconfig "$K" -n {{ portworx_namespace }} get pod -o name 2>/dev/null | grep px-csi-ext); do
+              oc --kubeconfig "$K" -n {{ portworx_namespace }} describe "$pod" 2>&1 | sed -n '/Events:/,$p' || true
+            done
+            exit 1
+          fi
+
+          if [ $((csi_elapsed - CSI_LAST_DETAIL)) -ge 120 ]; then
+            CSI_LAST_DETAIL=$csi_elapsed
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get deployment stork stork-scheduler px-csi-ext -o wide 2>/dev/null || true
+            oc --kubeconfig "$K" -n {{ portworx_namespace }} get pods -o wide 2>/dev/null | egrep 'stork|px-csi-ext' || true
+          fi
+
+          sleep "$PX_POLL"
+        done
+
+        if ! oc --kubeconfig "$K" -n {{ portworx_namespace }} get secret px-pure-secret >/dev/null 2>&1; then
+          echo "ERROR: px-pure-secret is missing on {{ item.name }} even though the StorageCluster is Running." >&2
           exit 1
         fi
 

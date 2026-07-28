@@ -267,7 +267,7 @@ The workflow is resumable. Completed hub and spoke work is skipped where possibl
 
 ## Deploy Dedicated Storage
 
-After both spokes are available, deploy Portworx against each site's assigned Pure FlashArray.
+After both spokes are available, you can pre-stage Portworx against each site's assigned Pure FlashArray. This step is optional before `hcp-create.sh`; the HCP workflow now performs the same node preparation, Operator installation, StorageCluster deployment and readiness wait automatically when Portworx is not ready.
 
 ### Site-A
 
@@ -317,12 +317,14 @@ Create all configured HCP tenants and import them into RHACM:
 The HCP workflow:
 
 1. Confirms Site-A and Site-B are ready to host HCP.
-2. Applies the required HyperShift, KubeVirt, networking, pull-secret, and storage prerequisites.
-3. Creates each `HostedCluster` and `NodePool` on its assigned hosting site.
-4. Uses the site-local Portworx storage classes for HCP etcd, worker root disks, and tenant data disks.
-5. Waits for the tenant admin kubeconfig secrets.
-6. Exports the HCP tenant kubeconfigs.
-7. Imports all HCP tenant clusters into RHACM on the SNO hub.
+2. Waits for the RHACM-managed HyperShift add-ons and operators.
+3. Applies Portworx node preparation and waits for both master MachineConfigPools to finish.
+4. Installs the Portworx Operator and each site-specific Pure-backed `StorageCluster` when required.
+5. Waits for the Portworx CRD, `StorageCluster` object and `status.phase=Running` on both sites.
+6. Applies the required HyperShift, KubeVirt, networking, pull-secret, and storage prerequisites.
+7. Creates each `HostedCluster` and `NodePool` on its assigned hosting site.
+8. Uses the site-local Portworx storage classes for HCP etcd, worker root disks, and tenant data disks.
+9. Waits for the tenant admin kubeconfig secrets, exports them, and imports all HCP tenants into RHACM.
 
 Exported HCP kubeconfigs are stored under:
 
@@ -505,3 +507,38 @@ mce_install_poll_seconds: 15
 
 Do not delete the SNO or `MultiClusterHub` when this is only an installation delay. The runner
 prints the ACM/MCE CSV and warning-event status while it waits.
+
+
+## Portworx readiness during HCP creation
+
+`hcp-create.sh` no longer assumes that Portworx was installed separately. It applies the site-specific RHACM policies in dependency order:
+
+1. node preparation;
+2. MachineConfigPool health;
+3. Portworx Operator, Pure secret and StorageCluster;
+4. Portworx readiness;
+5. HCP StorageClasses and StorageProfiles.
+
+The default Portworx readiness window is:
+
+```yaml
+hcp_portworx_wait_timeout_seconds: 3600
+hcp_portworx_wait_poll_seconds: 30
+```
+
+During the wait, the runner displays whether the CRD and StorageCluster exist and the current StorageCluster phase. On timeout it prints OLM resources, Portworx pods, CRDs, StorageCluster details and recent events.
+
+## HyperShift add-on readiness
+
+The HyperShift Operator on Site-A and Site-B is installed by the RHACM/MCE
+`hypershift-addon`. `hcp-create.sh` waits for all of the following before it
+creates tenant clusters:
+
+- the managed add-on reports `Available=True`;
+- its deploy `ManifestWork` applies successfully;
+- the `HostedCluster` and `NodePool` CRDs exist on the hosting cluster; and
+- `deployment/operator` in the `hypershift` namespace has an available replica.
+
+The runner does not use `hcp install render` as a fallback. The Red Hat `hcp`
+binary shipped by the environment is used for hosted-cluster lifecycle and
+kubeconfig export after the hub-managed add-on has installed the operator.

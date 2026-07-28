@@ -50,7 +50,7 @@ subjects:
     name: portworx-pure-secret-${site}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: portworx-flasharray-storagecluster-${site}
+    name: portworx-pure-storagecluster-${site}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
     name: portworx-openshift-console-plugin-${site}

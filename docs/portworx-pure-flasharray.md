@@ -17,9 +17,9 @@ The RHACM objects on the hub are site-suffixed so credentials and placement cann
 
 ```text
 portworx-pure-secret-site-a
-portworx-flasharray-storagecluster-site-a
+portworx-pure-storagecluster-site-a
 portworx-pure-secret-site-b
-portworx-flasharray-storagecluster-site-b
+portworx-pure-storagecluster-site-b
 ```
 
 ## Why the policies are separate

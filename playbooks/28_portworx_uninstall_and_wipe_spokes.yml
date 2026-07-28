@@ -37,7 +37,12 @@
       ansible.builtin.shell: |
         set -euo pipefail
         for site in site-a site-b; do
-          oc -n {{ portworx_pure_policy_namespace }} patch policy "portworx-flasharray-storagecluster-${site}" --type=merge -p '{"spec":{"disabled":true}}' 2>/dev/null || true
+          for policy_name in \
+            "portworx-pure-storagecluster-${site}" \
+            "portworx-flasharray-storagecluster-${site}"; do
+            oc -n {{ portworx_pure_policy_namespace }} patch policy "$policy_name" \
+              --type=merge -p '{"spec":{"disabled":true}}' 2>/dev/null || true
+          done
         done
       args:
         executable: /bin/bash

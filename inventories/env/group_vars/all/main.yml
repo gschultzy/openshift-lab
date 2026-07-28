@@ -313,6 +313,17 @@ mce_local_cluster_name: local-cluster
 mce_hypershift_enabled: true
 mce_hypershift_local_hosting_enabled: false
 mce_hypershift_addon_name: hypershift-addon
+
+# Wait for the hub-managed HyperShift add-on to deploy the operator and CRDs
+# to Site-A and Site-B. Do not use a separate direct hcp install fallback.
+hcp_hypershift_addon_wait_timeout_seconds: 1800
+hcp_hypershift_addon_wait_poll_seconds: 15
+
+# Portworx is installed through RHACM policies and therefore converges
+# asynchronously. HCP creation waits for the Operator CRD, StorageCluster
+# object and status.phase=Running before preparing HCP StorageClasses.
+hcp_portworx_wait_timeout_seconds: 3600
+hcp_portworx_wait_poll_seconds: 30
 # MCE 2.11 renders the local HyperShift add-on and its pre-delete cleanup Job
 # into this namespace. Create it before disabling local HCP hosting.
 mce_hypershift_addon_work_namespace: open-cluster-management-agent-addon-discovery
@@ -403,7 +414,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.81
-    boot_mac: "BC:97:E1:6E:5E:E0"
+    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
     ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -414,7 +425,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.82
-    boot_mac: "BC:97:E1:6E:40:C0"
+    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
     ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -425,7 +436,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.83
-    boot_mac: "BC:97:E1:C3:F1:C0"
+    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
     ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -479,7 +490,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.84
-    boot_mac: "BC:97:E1:6E:6C:10"
+    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -490,7 +501,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.85
-    boot_mac: "BC:97:E1:C3:F6:80"
+    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -501,7 +512,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.86
-    boot_mac: "BC:97:E1:C3:F7:00"
+    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1

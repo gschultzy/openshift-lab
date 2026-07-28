@@ -9,7 +9,7 @@
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: portworx-flasharray-storagecluster{{ _policy_suffix }}
+  name: portworx-pure-storagecluster{{ _policy_suffix }}
   namespace: {{ portworx_pure_policy_namespace }}
   annotations:
     policy.open-cluster-management.io/standards: Portworx Pure FlashArray
@@ -25,7 +25,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: portworx-flasharray-storagecluster{{ _policy_suffix }}
+          name: portworx-pure-storagecluster{{ _policy_suffix }}
         spec:
           remediationAction: {{ portworx_pure_policy_remediation_action }}
           severity: high

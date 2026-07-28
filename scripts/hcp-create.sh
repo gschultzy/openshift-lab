@@ -66,9 +66,16 @@ export HCP_KUBECONFIG_WAIT_DELAY="${HCP_KUBECONFIG_WAIT_DELAY:-10}"
 export HCP_IMPORT_SKIP_NOT_READY="${HCP_IMPORT_SKIP_NOT_READY:-false}"
 export HCP_IMPORT_WAIT="${HCP_IMPORT_WAIT:-true}"
 export HCP_IMPORT_FORCE_CLEANUP="${HCP_IMPORT_FORCE_CLEANUP:-true}"
-# Lab fallback: when RHACM hypershift-addon gets stuck before creating CRDs,
-# bootstrap the HyperShift operator on the spoke with `hcp install render`.
-export HCP_DIRECT_HYPERSHIFT_INSTALL="${HCP_DIRECT_HYPERSHIFT_INSTALL:-true}"
+# HyperShift operators are deployed to Site-A and Site-B by the RHACM/MCE
+# hypershift-addon. The runner waits for the add-on, ManifestWork, CRDs and
+# operator deployment instead of trying unsupported direct-install CLI flags.
+export HCP_HYPERSHIFT_ADDON_WAIT_TIMEOUT_SECONDS="${HCP_HYPERSHIFT_ADDON_WAIT_TIMEOUT_SECONDS:-1800}"
+export HCP_HYPERSHIFT_ADDON_WAIT_POLL_SECONDS="${HCP_HYPERSHIFT_ADDON_WAIT_POLL_SECONDS:-15}"
+# Portworx is installed asynchronously through RHACM policies. Allow enough time
+# for MachineConfig rollout, OLM, the StorageCluster CRD and the StorageCluster
+# itself to become healthy before creating HCP storage resources.
+export HCP_PORTWORX_WAIT_TIMEOUT_SECONDS="${HCP_PORTWORX_WAIT_TIMEOUT_SECONDS:-3600}"
+export HCP_PORTWORX_WAIT_POLL_SECONDS="${HCP_PORTWORX_WAIT_POLL_SECONDS:-30}"
 
 SITE_A_KUBECONFIG="${SITE_A_KUBECONFIG:-$ENV_SITE_A_KUBECONFIG}"
 SITE_B_KUBECONFIG="${SITE_B_KUBECONFIG:-$ENV_SITE_B_KUBECONFIG}"
@@ -86,7 +93,10 @@ COMMON_EXTRA_VARS=(
   -e "portworx_hcp_root_volume_access_modes=$HCP_ROOT_VOLUME_ACCESS_MODES"
   -e "portworx_hcp_root_volume_volume_mode=$HCP_ROOT_VOLUME_VOLUME_MODE"
   -e "portworx_hcp_enable_root_volume_cache=$HCP_ROOT_VOLUME_CACHE"
-  -e "hcp_direct_hypershift_install=$HCP_DIRECT_HYPERSHIFT_INSTALL"
+  -e "hcp_hypershift_addon_wait_timeout_seconds=$HCP_HYPERSHIFT_ADDON_WAIT_TIMEOUT_SECONDS"
+  -e "hcp_hypershift_addon_wait_poll_seconds=$HCP_HYPERSHIFT_ADDON_WAIT_POLL_SECONDS"
+  -e "hcp_portworx_wait_timeout_seconds=$HCP_PORTWORX_WAIT_TIMEOUT_SECONDS"
+  -e "hcp_portworx_wait_poll_seconds=$HCP_PORTWORX_WAIT_POLL_SECONDS"
 )
 
 tenant_extra_vars() {
@@ -220,7 +230,10 @@ echo "NodePool VM size:      $HCP_WORKER_CORES cores / $HCP_WORKER_MEMORY"
 echo "NodePool replicas:     $HCP_NODEPOOL_REPLICAS"
 echo "Recreate if existing:  $HCP_RECREATE"
 echo "Import into RHACM:     true"
-echo "Direct HCP operator bootstrap: $HCP_DIRECT_HYPERSHIFT_INSTALL"
+echo "HCP operator source:    RHACM/MCE hypershift-addon"
+echo "Add-on wait timeout:    ${HCP_HYPERSHIFT_ADDON_WAIT_TIMEOUT_SECONDS}s"
+echo "Portworx wait timeout:  ${HCP_PORTWORX_WAIT_TIMEOUT_SECONDS}s"
+echo "Pure API tokens:       Vault token, otherwise existing generated token files"
 echo
 echo "Tenants:"
 hcp_tenants | while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
@@ -234,16 +247,31 @@ ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbook
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/17_configure_acm_mce_integration.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/16_ensure_hypershift_operator_on_spokes.yml
 
-# Ensure the Portworx HCP StorageClass policy is present before the spoke-side
-# preparation step validates/patches StorageProfiles and HyperConverged. This
-# only applies the HCP StorageClass policy; it does not reinstall Portworx.
+# HCP storage in this lab is Portworx-backed. A clean environment does not yet
+# have the Portworx Operator or StorageCluster CRD, so make the HCP workflow
+# self-contained instead of assuming bootstrap-pure-token-and-portworx.sh was
+# run separately.
+say "Prepare Portworx node prerequisites on Site-A and Site-B"
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/20_apply_portworx_pure_policies.yml \
-  -e portworx_pure_apply_node_prep=false \
+  -e portworx_pure_apply_node_prep=true \
   -e portworx_pure_apply_operator=false \
   -e portworx_pure_apply_storagecluster=false \
   -e portworx_enable_openshift_console_plugin=false \
+  -e portworx_pure_apply_hcp_storageclasses=false
+
+# Node preparation uses MachineConfig and can reboot compact-cluster masters.
+# Do not submit the StorageCluster until both master MCPs are fully healthy.
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/23_wait_portworx_pure_node_prep.yml
+
+say "Install Portworx/Pure and HCP StorageClasses on Site-A and Site-B"
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/20_apply_portworx_pure_policies.yml \
+  -e portworx_pure_apply_node_prep=true \
+  -e portworx_pure_apply_operator=true \
+  -e portworx_pure_apply_storagecluster=true \
   -e portworx_pure_apply_hcp_storageclasses=true
 
+# This playbook now waits for OLM, the StorageCluster CRD, the site-specific
+# StorageCluster and phase=Running before it creates/patches the HCP classes.
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/27_prepare_hcp_portworx_storage_on_spokes.yml
 
 say "Prepare Site-A HCP prerequisites"

@@ -139,7 +139,7 @@ Disable StorageCluster enforcement while cleaning Pure or rebuilding nodes:
 HUB=build/{{ cluster_name }}/install/auth/kubeconfig
 
 for site in site-a site-b; do
-  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-pure-storagecluster-${site}" \
     --type=merge \
     -p '{"spec":{"disabled":true}}'
 done
@@ -149,7 +149,7 @@ Enable it again:
 
 ```bash
 for site in site-a site-b; do
-  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-pure-storagecluster-${site}" \
     --type=merge \
     -p '{"spec":{"disabled":false}}'
 done
@@ -163,7 +163,7 @@ for site in site-a site-b; do
     portworx-pure-node-prep \
     portworx-operator \
     portworx-pure-secret \
-    portworx-flasharray-storagecluster \
+    portworx-pure-storagecluster \
     portworx-openshift-console-plugin \
     portworx-hcp-storageclasses
   do
@@ -204,7 +204,7 @@ First disable the StorageCluster policy:
 ```bash
 HUB=build/{{ cluster_name }}/install/auth/kubeconfig
 for site in site-a site-b; do
-  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-pure-storagecluster-${site}" \
     --type=merge \
     -p '{"spec":{"disabled":true}}'
 done
@@ -231,7 +231,7 @@ Re-enable StorageCluster enforcement:
 
 ```bash
 for site in site-a site-b; do
-  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-flasharray-storagecluster-${site}" \
+  oc --kubeconfig "$HUB" -n portworx-pure-policies patch policy "portworx-pure-storagecluster-${site}" \
     --type=merge \
     -p '{"spec":{"disabled":false}}'
 done
@@ -377,3 +377,18 @@ acm_wait_poll_seconds: 30
 Do not delete the `MultiClusterHub` merely because installation takes longer than
 expected. First check Pending pods, image pulls, insufficient CPU or memory, failed
 OLM CSVs, PVCs, and warning events using the diagnostic script.
+
+### RHACM policy namespace/name length error
+
+RHACM validates the combined length of a Policy namespace and Policy name. The
+combined value must not exceed 62 characters. The Portworx StorageCluster
+policy therefore uses the shortened site-specific names:
+
+```text
+portworx-pure-storagecluster-site-a
+portworx-pure-storagecluster-site-b
+```
+
+The playbook validates all generated Portworx Policy names before applying
+them, so future namespace or suffix changes fail before reaching the admission
+webhook.

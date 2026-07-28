@@ -66,3 +66,26 @@ for k in build/{{ cluster_name }}/hcp-kubeconfigs/*.kubeconfig; do
   oc --kubeconfig "$k" get clusterversion,nodes
 fi
 ```
+
+## Stork SCC bootstrap on compact OpenShift hosts
+
+Portworx 3.6 can annotate `deployment/stork` with
+`openshift.io/required-scc: hostmount-anyuid`. The `stork` service account must
+have `use` permission for that exact SCC or the ReplicaSet fails before pods are
+created. Because `px-csi-ext` is scheduled through Stork, the failure also
+leaves every `pxd.portworx.com` PVC Pending.
+
+The automated HCP workflow now grants and validates this permission on Site-A
+and Site-B before waiting for the Stork extender and CSI controller:
+
+```bash
+oc adm policy add-scc-to-user hostmount-anyuid \
+  system:serviceaccount:portworx:stork
+
+oc auth can-i use scc/hostmount-anyuid \
+  --as=system:serviceaccount:portworx:stork
+```
+
+A healthy result has `deployment/stork` and `deployment/px-csi-ext` fully
+available and `stork-service` populated with endpoints before any HCP is
+created.

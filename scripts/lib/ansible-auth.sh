@@ -79,10 +79,16 @@ configure_local_become_auth() {
     return 0
   fi
 
-  # Passwordless sudo, or a still-valid cached credential, requires no password
-  # file for Ansible's local become tasks.
-  if sudo -n true >/dev/null 2>&1; then
-    echo "Local sudo access is already available for Ubuntu DNS resolver configuration."
+  # Never trust a cached terminal sudo timestamp here. Ansible's local
+  # connection can run sudo without the caller's TTY and therefore may not be
+  # able to reuse that timestamp. Invalidate it first, then test a real
+  # privileged operation non-interactively. Only genuine NOPASSWD sudo should
+  # bypass the become-password prompt.
+  sudo -k >/dev/null 2>&1 || true
+  local sudo_mkdir
+  sudo_mkdir="$(command -v mkdir)"
+  if sudo -n -p '' "$sudo_mkdir" -p /etc/systemd/resolved.conf.d >/dev/null 2>&1; then
+    echo "Passwordless sudo was validated for Ubuntu DNS resolver configuration."
     LOCAL_BECOME_AUTH_READY=true
     return 0
   fi

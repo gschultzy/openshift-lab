@@ -398,7 +398,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.81
-    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:5E:E0"
     ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -409,7 +409,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.82
-    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:6E:40:C0"
     ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -420,7 +420,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.83
-    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
+    boot_mac: "BC:97:E1:C3:F1:C0"
     ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1

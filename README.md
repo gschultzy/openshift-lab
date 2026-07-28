@@ -473,3 +473,19 @@ The topology check runs automatically during the full deployment, Site-A and Sit
 export KUBECONFIG="$PWD/build/lab-sno/install/auth/kubeconfig"
 ./scripts/fix-acm-hypershift-local-hosting.sh
 ```
+
+### Local sudo authentication
+
+The deployment configures `systemd-resolved` on the Ubuntu bastion and therefore
+needs local sudo access. The runner deliberately invalidates any cached terminal
+sudo timestamp before testing access. It skips the password prompt only when
+actual non-interactive passwordless sudo is available. Otherwise enter the
+Ubuntu login/sudo password when prompted; this is separate from the Ansible
+Vault password.
+
+For unattended execution, store only the sudo password in a mode `0600` file and
+set:
+
+```bash
+export ANSIBLE_BECOME_PASSWORD_FILE="$HOME/.openshift-lab-become-password"
+```

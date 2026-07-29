@@ -47,6 +47,61 @@
         wait hyperconverged/kubevirt-hyperconverged --for=condition=Available --timeout=45m
       changed_when: false
 
+    - name: Wait for Kubernetes NMState to become Available on Site-B
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ site_b_kubeconfig_file | quote }}
+        timeout={{ nmstate_wait_timeout_seconds | int }}
+        start=$(date +%s)
+        while true; do
+          if oc --kubeconfig "$K" get crd nmstates.nmstate.io >/dev/null 2>&1              && oc --kubeconfig "$K" get nmstate {{ nmstate_instance_name | quote }} >/dev/null 2>&1; then
+            available=$(oc --kubeconfig "$K" get nmstate {{ nmstate_instance_name | quote }} -o json |               jq -r '[.status.conditions[]? | select(.type=="Available") | .status][0] // "false"')
+            if [[ "$available" == True ]]; then
+              echo "Site-B: NMState/{{ nmstate_instance_name }} is Available."
+              exit 0
+            fi
+          fi
+          elapsed=$(( $(date +%s) - start ))
+          echo "Site-B: waiting for NMState CRD, singleton, and Available=True (${elapsed}s/${timeout}s)"
+          if (( elapsed >= timeout )); then
+            echo "ERROR: Timed out waiting for Kubernetes NMState on Site-B." >&2
+            oc --kubeconfig "$K" -n {{ nmstate_namespace | quote }} get subscription,csv,installplan,pods || true
+            oc --kubeconfig "$K" get nmstate 2>/dev/null || true
+            exit 1
+          fi
+          sleep 15
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: nmstate_enabled | default(true) | bool
+
+    - name: Wait for NodeNetworkState inventory on all Site-B nodes
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ site_b_kubeconfig_file | quote }}
+        timeout={{ nmstate_wait_timeout_seconds | int }}
+        start=$(date +%s)
+        while true; do
+          expected=$(oc --kubeconfig "$K" get nodes --no-headers | wc -l | tr -d ' ')
+          actual=$(oc --kubeconfig "$K" get nodenetworkstate --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "Site-B: NodeNetworkState inventory $actual/$expected"
+          if [[ "$expected" -gt 0 && "$actual" -ge "$expected" ]]; then
+            exit 0
+          fi
+          if (( $(date +%s) - start >= timeout )); then
+            echo "ERROR: Timed out waiting for NodeNetworkState objects on Site-B." >&2
+            oc --kubeconfig "$K" -n {{ nmstate_namespace }} get subscription,csv,pods || true
+            oc --kubeconfig "$K" get nmstate,nodenetworkstate || true
+            exit 1
+          fi
+          sleep 15
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: nmstate_enabled | default(true) | bool
+
     - name: Check Site-B HyperShift managed cluster add-on status on hub
       ansible.builtin.shell: |
         set -euo pipefail
@@ -109,6 +164,10 @@
         echo
         echo '# Virtualization'
         oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ site_b_virt_namespace }} get hyperconverged,pods
+        echo
+        echo '# Kubernetes NMState'
+        oc --kubeconfig {{ site_b_kubeconfig_file }} -n {{ nmstate_namespace }} get subscription,csv,pods || true
+        oc --kubeconfig {{ site_b_kubeconfig_file }} get nmstate,nodenetworkstate || true
         echo
         echo '# HyperShift add-on on hub'
         oc --kubeconfig {{ hub_kubeconfig }} -n {{ site_b_cluster_name }} get managedclusteraddon hypershift-addon -o wide || true

@@ -1,0 +1,53 @@
+{% if nmstate_enabled | default(true) | bool %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: site-b-nmstate-operator
+  namespace: {{ site_b_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Site-B HCP
+    policy.open-cluster-management.io/categories: Networking
+    policy.open-cluster-management.io/controls: Install Kubernetes NMState Operator
+spec:
+  remediationAction: {{ site_b_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: site-b-nmstate-operator
+        spec:
+          remediationAction: {{ site_b_policy_remediation_action }}
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: {{ nmstate_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1
+                kind: OperatorGroup
+                metadata:
+                  name: {{ nmstate_operatorgroup_name }}
+                  namespace: {{ nmstate_namespace }}
+                spec:
+                  targetNamespaces:
+                    - {{ nmstate_namespace }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: {{ nmstate_subscription_name }}
+                  namespace: {{ nmstate_namespace }}
+                spec:
+                  channel: {{ nmstate_operator_channel }}
+                  installPlanApproval: {{ nmstate_install_plan_approval }}
+                  name: {{ nmstate_operator_package }}
+                  source: {{ nmstate_operator_source }}
+                  sourceNamespace: {{ nmstate_operator_source_namespace }}
+{% endif %}

@@ -587,3 +587,42 @@ ACM 2.16 uses two Fleet Virtualization add-ons: `mtv-operator` and
 virtualization playbook removes that obsolete object when it is found, labels
 existing Site-A and Site-B ManagedClusters, and prints live diagnostics while
 waiting for the two ACM 2.16 add-ons.
+
+## Kubernetes NMState on Site-A and Site-B
+
+The full hub-and-spoke workflow installs the Kubernetes NMState Operator only on
+the physical HCP hosting clusters:
+
+- `site-a`
+- `site-b`
+
+It does not install NMState on the management SNO (`local-cluster`) or on the
+hosted tenant clusters. NMState configures the node interfaces of the cluster
+where it runs, so the physical hosting clusters are the correct scope for Linux
+bridges, bonds, VLANs, secondary NICs, routes, and later
+`NodeNetworkConfigurationPolicy` resources.
+
+NMState is enforced by the existing Site-A and Site-B RHACM Governance policy
+bundles. Each bundle creates:
+
+- `Namespace/openshift-nmstate`
+- `OperatorGroup/openshift-nmstate`
+- `Subscription/kubernetes-nmstate-operator` on channel `stable`
+- the singleton `NMState/nmstate`
+
+A full deployment installs and validates NMState automatically:
+
+```bash
+./scripts/run-full-hub-and-spoke.sh
+```
+
+To reconcile NMState on an environment where Site-A and Site-B already exist:
+
+```bash
+./scripts/install-nmstate-hosting-clusters.sh
+```
+
+The wait verifies that `NMState/nmstate` is `Available` and that every physical
+node has a `NodeNetworkState` object. Configuration of the primary interface,
+its underlying interface, or `br-ex` is intentionally not included. Add network
+policies only after identifying the correct secondary interfaces.

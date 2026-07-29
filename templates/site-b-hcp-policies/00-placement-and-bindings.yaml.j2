@@ -51,6 +51,14 @@ subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
     name: site-b-ingress-wildcards
+{% if nmstate_enabled | default(true) | bool %}
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: site-b-nmstate-operator
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: site-b-nmstate-instance
+{% endif %}
 {% if site_b_lvm_policy_enabled | default(false) | bool %}
   - apiGroup: policy.open-cluster-management.io
     kind: Policy

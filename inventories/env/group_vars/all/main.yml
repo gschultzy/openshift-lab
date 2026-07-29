@@ -978,6 +978,24 @@ portworx_pure_sites:
     pod: "{{ site_b_pure_flasharray_pod }}"
 
 # ---------------------------------------------------------------------------
+# Kubernetes NMState on physical HCP hosting clusters
+# ---------------------------------------------------------------------------
+# Installed through the existing Site-A and Site-B RHACM Governance bundles.
+# These policies target only the physical hosting ManagedClusters, not the SNO
+# management hub and not any hosted tenant clusters.
+nmstate_enabled: true
+nmstate_namespace: openshift-nmstate
+nmstate_operatorgroup_name: openshift-nmstate
+nmstate_subscription_name: kubernetes-nmstate-operator
+nmstate_operator_package: kubernetes-nmstate-operator
+nmstate_operator_channel: stable
+nmstate_operator_source: redhat-operators
+nmstate_operator_source_namespace: openshift-marketplace
+nmstate_install_plan_approval: Automatic
+nmstate_instance_name: nmstate
+nmstate_wait_timeout_seconds: 1800
+
+# ---------------------------------------------------------------------------
 # Shared lab administrator authentication
 # ---------------------------------------------------------------------------
 # HTPasswd is used only for this isolated Pod 74 lab. The requested credentials

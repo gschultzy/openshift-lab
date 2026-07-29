@@ -9,6 +9,8 @@
       - templates/site-b-hcp-policies/03-metallb-policy.yaml.j2
       - templates/site-b-hcp-policies/04-ingress-wildcards-policy.yaml.j2
       - templates/site-b-hcp-policies/05-lvm-policy.yaml.j2
+      - templates/site-b-hcp-policies/06-nmstate-operator-policy.yaml.j2
+      - templates/site-b-hcp-policies/07-nmstate-instance-policy.yaml.j2
   tasks:
     - name: Confirm hub kubeconfig exists
       ansible.builtin.stat:

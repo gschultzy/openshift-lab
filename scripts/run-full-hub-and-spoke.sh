@@ -110,7 +110,7 @@ run_playbook playbooks/09_wait_baremetal_cluster.yml
 # Site-A is now managed; apply the shared administrator policy to it.
 run_playbook playbooks/07_configure_lab_admin.yml
 
-# Site-A ACM Governance / HCP hosting policies
+# Site-A ACM Governance / HCP hosting policies, including Kubernetes NMState.
 run_playbook playbooks/12_apply_site_a_hcp_policies.yml
 run_playbook playbooks/12_fix_site_a_policy_placement.yml
 # OpenShift Virtualization is now declared by the Site-A policy; select the
@@ -127,9 +127,12 @@ run_playbook playbooks/09_wait_site_b_baremetal_cluster.yml
 # Site-B is now managed; apply the shared administrator policy to it.
 run_playbook playbooks/07_configure_lab_admin.yml
 
-# Site-B ACM Governance / HCP hosting policies
+# Site-B ACM Governance / HCP hosting policies, including Kubernetes NMState.
 run_playbook playbooks/12_apply_site_b_hcp_policies.yml
 run_playbook playbooks/12_fix_site_b_policy_placement.yml
 # OpenShift Virtualization is now declared by the Site-B policy; ensure both
 # physical hosting clusters are selected for Fleet Virtualization and MTV.
 run_playbook playbooks/06_enable_acm_virtualization.yml
+# Kubernetes NMState is declared in both hosting-cluster policy bundles.
+# Wait for the singleton NMState resource and one NodeNetworkState per physical node.
+run_playbook playbooks/08_wait_nmstate_on_hosting_clusters.yml

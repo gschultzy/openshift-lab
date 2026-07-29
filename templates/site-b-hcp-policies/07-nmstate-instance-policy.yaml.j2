@@ -1,0 +1,30 @@
+{% if nmstate_enabled | default(true) | bool %}
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: site-b-nmstate-instance
+  namespace: {{ site_b_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: Site-B HCP
+    policy.open-cluster-management.io/categories: Networking
+    policy.open-cluster-management.io/controls: Configure Kubernetes NMState
+spec:
+  remediationAction: {{ site_b_policy_remediation_action }}
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: site-b-nmstate-instance
+        spec:
+          remediationAction: {{ site_b_policy_remediation_action }}
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: nmstate.io/v1
+                kind: NMState
+                metadata:
+                  name: {{ nmstate_instance_name }}
+{% endif %}

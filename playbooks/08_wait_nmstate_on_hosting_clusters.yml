@@ -1,0 +1,142 @@
+---
+- name: Wait for Kubernetes NMState on physical HCP hosting clusters
+  hosts: localhost
+  gather_facts: false
+  vars:
+    nmstate_hosting_sites:
+      - display_name: Site-A
+        managed_cluster: "{{ bm_cluster_name }}"
+        kubeconfig_file: "{{ site_a_kubeconfig_file }}"
+      - display_name: Site-B
+        managed_cluster: "{{ site_b_cluster_name }}"
+        kubeconfig_file: "{{ site_b_kubeconfig_file }}"
+  tasks:
+    - name: Skip when Kubernetes NMState is disabled
+      ansible.builtin.meta: end_play
+      when: not (nmstate_enabled | default(true) | bool)
+
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: nmstate_hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not nmstate_hub_kubeconfig_stat.stat.exists
+
+    - name: Validate this kubeconfig is the RHACM hub
+      ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
+      changed_when: false
+      register: nmstate_hub_api_server
+
+    - name: Stop if running against a spoke
+      ansible.builtin.fail:
+        msg: |
+          Refusing to manage the NMState RHACM policies from a spoke kubeconfig.
+          Current API server: {{ nmstate_hub_api_server.stdout }}
+          Expected: api.{{ cluster_name }}.{{ base_domain }}
+      when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in nmstate_hub_api_server.stdout"
+
+    - name: Ensure hosting-cluster kubeconfig directories exist
+      ansible.builtin.file:
+        path: "{{ item.kubeconfig_file | dirname }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ nmstate_hosting_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
+
+    - name: Confirm hosting ManagedClusters exist
+      ansible.builtin.command: >-
+        oc --kubeconfig {{ hub_kubeconfig | quote }}
+        get managedcluster {{ item.managed_cluster }}
+      changed_when: false
+      loop: "{{ nmstate_hosting_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
+
+    - name: Extract current hosting-cluster admin kubeconfigs from RHACM
+      ansible.builtin.shell: |
+        set -euo pipefail
+        oc --kubeconfig {{ hub_kubeconfig | quote }} \
+          -n {{ item.managed_cluster | quote }} \
+          get secret {{ (item.managed_cluster ~ '-admin-kubeconfig') | quote }} \
+          -o jsonpath='{.data.kubeconfig}' | base64 -d > {{ item.kubeconfig_file | quote }}
+        chmod 0600 {{ item.kubeconfig_file | quote }}
+      args:
+        executable: /bin/bash
+      changed_when: true
+      loop: "{{ nmstate_hosting_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"
+
+    - name: Wait for Kubernetes NMState and node inventory
+      ansible.builtin.shell: |
+        set -euo pipefail
+        K={{ item.kubeconfig_file | quote }}
+        timeout={{ nmstate_wait_timeout_seconds | int }}
+        start=$(date +%s)
+        next_diagnostics=0
+
+        while true; do
+          now=$(date +%s)
+          elapsed=$((now - start))
+          crd=absent
+          instance=absent
+          available=false
+          expected_nodes=0
+          network_states=0
+
+          if oc --kubeconfig "$K" get crd nmstates.nmstate.io >/dev/null 2>&1; then
+            crd=present
+          fi
+          if oc --kubeconfig "$K" get nmstate {{ nmstate_instance_name | quote }} >/dev/null 2>&1; then
+            instance=present
+            available=$(oc --kubeconfig "$K" get nmstate {{ nmstate_instance_name | quote }} \
+              -o json | jq -r '[.status.conditions[]? | select(.type=="Available") | .status][0] // "false"')
+          fi
+          expected_nodes=$(oc --kubeconfig "$K" get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          network_states=$( { oc --kubeconfig "$K" get nodenetworkstate --no-headers 2>/dev/null || true; } | wc -l | tr -d ' ')
+
+          printf '%s: elapsed=%02dm%02ds crd=%s instance=%s Available=%s NodeNetworkState=%s/%s\n' \
+            {{ item.display_name | quote }} \
+            $((elapsed / 60)) $((elapsed % 60)) \
+            "$crd" "$instance" "$available" "$network_states" "$expected_nodes"
+
+          if [[ "$crd" == present && "$instance" == present && "$available" == True \
+                && "$expected_nodes" -gt 0 && "$network_states" -ge "$expected_nodes" ]]; then
+            echo "READY: Kubernetes NMState is available on {{ item.display_name }}."
+            oc --kubeconfig "$K" -n {{ nmstate_namespace | quote }} get subscription,csv,pods
+            oc --kubeconfig "$K" get nmstate,nodenetworkstate
+            exit 0
+          fi
+
+          if (( elapsed >= next_diagnostics )); then
+            echo
+            echo '# Operator installation'
+            oc --kubeconfig "$K" -n {{ nmstate_namespace | quote }} get subscription,csv,installplan,pods 2>/dev/null || true
+            echo
+            echo '# NMState resources'
+            oc --kubeconfig "$K" get nmstate,nodenetworkstate 2>/dev/null || true
+            echo
+            echo '# Recent warning events'
+            oc --kubeconfig "$K" get events -A --field-selector type=Warning \
+              --sort-by=.lastTimestamp 2>/dev/null | tail -n 30 || true
+            echo
+            next_diagnostics=$((elapsed + 60))
+          fi
+
+          if (( elapsed >= timeout )); then
+            echo "ERROR: Timed out after ${timeout}s waiting for Kubernetes NMState on {{ item.display_name }}." >&2
+            exit 1
+          fi
+
+          sleep 15
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      loop: "{{ nmstate_hosting_sites }}"
+      loop_control:
+        label: "{{ item.display_name }}"

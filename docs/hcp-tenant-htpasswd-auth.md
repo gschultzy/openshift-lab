@@ -1,72 +1,104 @@
-# HCP tenant HTPasswd authentication policy
+# Shared administrator for hub, spokes, and HCP tenants
 
-This repo includes RHACM Governance policies that configure HTPasswd OAuth for all HCP guest clusters by managing the `HostedCluster` resources on their hosting clusters.
+The repository configures one lab administrator across:
 
-Default tenants:
+- `local-cluster` (`lab-sno`)
+- `site-a`
+- `site-b`
+- `site-a-hcp-t1-px`
+- `site-a-hcp-t2-kv`
+- `site-b-hcp-t1-px`
+- `site-b-hcp-t2-kv`
 
-| Site | HostedCluster |
-|---|---|
-| Site-A | `site-a-hcp-t1-px` |
-| Site-A | `site-a-hcp-t2-kv` |
-| Site-B | `site-b-hcp-t1-px` |
-| Site-B | `site-b-hcp-t2-kv` |
+## Pod 74 defaults
 
-In hosted control planes, OAuth configuration is synced from the hosting cluster through the `HostedCluster` resource. Do not manage the tenant `OAuth/cluster` object directly for this flow.
+```text
+username: admin
+password: Password1!
+```
 
-## Apply
+The defaults work immediately after applying the ZIP. For a persistent environment, override them in the encrypted file `inventories/env/group_vars/all/vault.yml`:
+
+```yaml
+vault_cluster_admin_username: "admin"
+vault_cluster_admin_password: "CHANGE_ME"
+```
+
+## How it works
+
+Standard OpenShift clusters receive these resources through RHACM Governance:
+
+- `Secret/openshift-config/lab-admin-htpasswd`
+- `OAuth/cluster` identity provider `local-htpasswd`
+- `ClusterRoleBinding/lab-admin-cluster-admin`
+
+The hub and any reachable physical spokes are also bootstrapped directly so login does not have to wait for policy propagation. RHACM remains the continuous source of truth.
+
+For HCP tenants, authentication is configured on the hosting cluster through each `HostedCluster.spec.configuration.oauth` field. The guest `ClusterRoleBinding` is applied after its system-admin kubeconfig is exported, and RHACM continuously enforces that binding after import.
+
+## Automatic entry points
+
+The shared account is reconciled automatically by:
+
+```bash
+./scripts/run.sh
+./scripts/run-full-hub-and-spoke.sh
+./scripts/hcp-create.sh
+```
+
+To reconcile only authentication and RBAC:
+
+```bash
+./scripts/configure-lab-admin.sh
+```
+
+The old command remains as a compatibility wrapper:
 
 ```bash
 ./scripts/apply-hcp-tenant-htpasswd-policy.sh
 ```
 
-## What it creates
-
-On the Site-A hosting cluster:
-
-- `Secret/clusters/htpasswd-site-a-hcp-tenants`
-- OAuth configuration on `HostedCluster/clusters/site-a-hcp-t1-px`
-- OAuth configuration on `HostedCluster/clusters/site-a-hcp-t2-kv`
-
-On the Site-B hosting cluster:
-
-- `Secret/clusters/htpasswd-site-b-hcp-tenants`
-- OAuth configuration on `HostedCluster/clusters/site-b-hcp-t1-px`
-- OAuth configuration on `HostedCluster/clusters/site-b-hcp-t2-kv`
-
-## Credentials
-
-```text
-username: admin
-password: pureuser
-```
-
-The password is stored in the policy as a bcrypt htpasswd hash.
-
-## Verify
+## Verify RHACM policy state
 
 ```bash
-oc --kubeconfig build/{{ cluster_name }}/install/auth/kubeconfig \
-  -n hcp-tenant-auth-policies get policy,placement,placementdecision,placementbinding
+export KUBECONFIG="$PWD/build/lab-sno/install/auth/kubeconfig"
 
-for h in site-a-hcp-t1-px site-a-hcp-t2-kv; do
-  oc --kubeconfig build/{{ cluster_name }}/site-a/auth/kubeconfig \
-    -n clusters get hostedcluster "$h" -o yaml | \
-    egrep -A12 'oauth:|identityProviders:|HTPasswd|fileData'
-done
+oc -n lab-admin-policies get \
+  policy,placementrule,placementbinding
 
-for h in site-b-hcp-t1-px site-b-hcp-t2-kv; do
-  oc --kubeconfig build/{{ cluster_name }}/site-b/auth/kubeconfig \
-    -n clusters get hostedcluster "$h" -o yaml | \
-    egrep -A12 'oauth:|identityProviders:|HTPasswd|fileData'
+oc get managedcluster \
+  -L openshift-lab.redhat.com/admin-standard,openshift-lab.redhat.com/admin-hcp
+```
+
+## Verify standard clusters
+
+```bash
+for kubeconfig in \
+  build/lab-sno/install/auth/kubeconfig \
+  build/lab-sno/site-a/auth/kubeconfig \
+  build/lab-sno/site-b/auth/kubeconfig; do
+  echo "===== $kubeconfig ====="
+  oc --kubeconfig "$kubeconfig" get clusterrolebinding lab-admin-cluster-admin
+  oc --kubeconfig "$kubeconfig" get oauth cluster -o json | \
+    jq -r '.spec.identityProviders[] | select(.name == "local-htpasswd")'
 done
 ```
 
-## Cluster-admin role
-
-The host-synced HCP configuration path covers control-plane configuration such as OAuth. A tenant `ClusterRoleBinding` is guest-cluster RBAC, not a `HostedCluster.spec.configuration` field. Apply it after tenant APIs are reachable:
+## Verify HCP tenants
 
 ```bash
-for k in build/{{ cluster_name }}/hcp-kubeconfigs/*.kubeconfig; do
-  oc --kubeconfig "$k" adm policy add-cluster-role-to-user cluster-admin admin
- done
+for kubeconfig in build/lab-sno/hcp-kubeconfigs/*.kubeconfig; do
+  echo "===== $kubeconfig ====="
+  oc --kubeconfig "$kubeconfig" get clusterrolebinding lab-admin-cluster-admin
+  oc --kubeconfig "$kubeconfig" auth can-i '*' '*' --as=admin
+done
 ```
+
+Keep the exported system-admin kubeconfigs as recovery credentials. Adding an HTPasswd identity provider does not replace those certificate-based kubeconfigs.
+
+## RHACM label selector validation
+
+ManagedCluster label values are strings. The shared-admin policy templates quote
+`"true"` explicitly and use a server-side dry run before applying policies. This
+prevents YAML from converting the selector value to a Boolean, which the
+Kubernetes API rejects for `matchLabels`.

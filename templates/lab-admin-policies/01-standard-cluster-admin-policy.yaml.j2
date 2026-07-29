@@ -1,0 +1,60 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ lab_admin_standard_policy_name }}
+  namespace: {{ lab_admin_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: OpenShift lab access
+    policy.open-cluster-management.io/categories: Authentication and RBAC
+    policy.open-cluster-management.io/controls: Shared lab cluster administrator
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ lab_admin_standard_policy_name }}
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: {{ lab_admin_htpasswd_secret_name }}
+                  namespace: openshift-config
+                type: Opaque
+                data:
+                  htpasswd: '{% raw %}{{hub fromSecret "{% endraw %}{{ lab_admin_policy_namespace }}{% raw %}" "{% endraw %}{{ lab_admin_source_secret_name }}{% raw %}" "htpasswd" hub}}{% endraw %}'
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: OAuth
+                metadata:
+                  name: cluster
+                spec:
+                  identityProviders:
+                    - name: {{ lab_admin_idp_name }}
+                      mappingMethod: add
+                      type: HTPasswd
+                      htpasswd:
+                        fileData:
+                          name: {{ lab_admin_htpasswd_secret_name }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: {{ lab_admin_cluster_admin_binding_name }}
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: cluster-admin
+                subjects:
+                  - apiGroup: rbac.authorization.k8s.io
+                    kind: User
+                    name: {{ lab_admin_username }}

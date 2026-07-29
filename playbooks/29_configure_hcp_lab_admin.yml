@@ -1,0 +1,98 @@
+---
+- name: Configure shared HTPasswd authentication on HostedCluster resources
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: hcp_lab_admin_hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not hcp_lab_admin_hub_kubeconfig_stat.stat.exists
+
+    - name: Prepare stable shared administrator credentials
+      ansible.builtin.include_tasks: tasks/prepare_lab_admin_credentials.yml
+
+    - name: Configure shared administrator OAuth on each existing HostedCluster
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubeconfig={{ (site_a_kubeconfig_file if item.site == 'site-a' else site_b_kubeconfig_file) | quote }}
+        namespace={{ (site_a_hcp_namespace if item.site == 'site-a' else site_b_hcp_namespace) | quote }}
+        hostedcluster={{ item.name | quote }}
+
+        if ! oc --kubeconfig "$kubeconfig" -n "$namespace" get hostedcluster "$hostedcluster" >/dev/null 2>&1; then
+          echo "Deferred: HostedCluster ${namespace}/${hostedcluster} does not exist yet."
+          exit 0
+        fi
+
+        jq -n \
+          --arg namespace "$namespace" \
+          --arg name {{ lab_admin_htpasswd_secret_name | quote }} \
+          --arg htpasswd "$LAB_ADMIN_HTPASSWD_B64" \
+          '{
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {namespace: $namespace, name: $name},
+            type: "Opaque",
+            data: {htpasswd: $htpasswd}
+          }' | oc --kubeconfig "$kubeconfig" apply -f -
+
+        providers="$(
+          oc --kubeconfig "$kubeconfig" -n "$namespace" get hostedcluster "$hostedcluster" -o json |
+          jq -c \
+            --arg idp {{ lab_admin_idp_name | quote }} \
+            --arg secret {{ lab_admin_htpasswd_secret_name | quote }} '
+              (.spec.configuration.oauth.identityProviders // [])
+              | map(select(.name != $idp))
+              + [{
+                  name: $idp,
+                  mappingMethod: "add",
+                  type: "HTPasswd",
+                  htpasswd: {fileData: {name: $secret}}
+                }]
+            '
+        )"
+
+        patch="$(jq -nc --argjson providers "$providers" '{spec:{configuration:{oauth:{identityProviders:$providers}}}}')"
+        oc --kubeconfig "$kubeconfig" -n "$namespace" patch hostedcluster "$hostedcluster" --type=merge -p "$patch"
+        echo "CONFIGURED: ${namespace}/${hostedcluster}"
+      args:
+        executable: /bin/bash
+      environment:
+        LAB_ADMIN_HTPASSWD_B64: "{{ lab_admin_htpasswd_file_b64 }}"
+      loop: "{{ hcp_tenants }}"
+      loop_control:
+        label: "{{ item.site }}/{{ item.name }}"
+      register: hcp_lab_admin_configure_results
+      changed_when: "'CONFIGURED:' in hcp_lab_admin_configure_results.stdout"
+      no_log: true
+
+    - name: Show HostedCluster OAuth provider status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for row in {% for tenant in hcp_tenants %}{{ tenant.site }}:{{ tenant.name }} {% endfor %}; do
+          site="${row%%:*}"
+          name="${row#*:}"
+          if [[ "$site" == site-a ]]; then
+            kubeconfig={{ site_a_kubeconfig_file | quote }}
+            namespace={{ site_a_hcp_namespace | quote }}
+          else
+            kubeconfig={{ site_b_kubeconfig_file | quote }}
+            namespace={{ site_b_hcp_namespace | quote }}
+          fi
+          if oc --kubeconfig "$kubeconfig" -n "$namespace" get hostedcluster "$name" >/dev/null 2>&1; then
+            configured="$(oc --kubeconfig "$kubeconfig" -n "$namespace" get hostedcluster "$name" -o json | jq -r --arg idp {{ lab_admin_idp_name | quote }} '[.spec.configuration.oauth.identityProviders[]? | select(.name == $idp)] | length')"
+            echo "$site/$name HTPasswdProviders=$configured"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: hcp_lab_admin_oauth_status
+      changed_when: false
+
+    - name: Print HostedCluster OAuth provider status
+      ansible.builtin.debug:
+        var: hcp_lab_admin_oauth_status.stdout_lines

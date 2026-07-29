@@ -36,3 +36,8 @@ vault_site_b_pure_flasharray_api_token: ""
 # vault_pure_flasharray_password / vault_pure_flasharray_api_token       -> Site-A
 # vault_pure_flasharray_secondary_password / secondary_api_token         -> Site-B
 
+
+# Shared lab administrator. These override the Pod 74 lab defaults in main.yml.
+# Use a unique password outside this isolated lab.
+vault_cluster_admin_username: "admin"
+vault_cluster_admin_password: "Password1!"

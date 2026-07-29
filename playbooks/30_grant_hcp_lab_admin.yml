@@ -1,0 +1,56 @@
+---
+- name: Grant the shared administrator cluster-admin rights inside HCP guests
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Grant and verify cluster-admin on each reachable HCP guest
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubeconfig={{ (hcp_kubeconfig_out_dir ~ '/' ~ item.name ~ '.kubeconfig') | quote }}
+
+        if [[ ! -s "$kubeconfig" ]]; then
+          if [[ {{ lab_admin_hcp_skip_missing_kubeconfigs | default(false) | bool | ternary("true", "false") }} == true ]]; then
+            echo "DEFERRED: guest kubeconfig is missing: $kubeconfig"
+            exit 0
+          fi
+          echo "ERROR: guest kubeconfig is missing: $kubeconfig" >&2
+          exit 1
+        fi
+
+        oc --kubeconfig "$kubeconfig" get clusterversion version >/dev/null
+
+        cat <<MANIFEST | oc --kubeconfig "$kubeconfig" apply -f -
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: {{ lab_admin_cluster_admin_binding_name }}
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+          - apiGroup: rbac.authorization.k8s.io
+            kind: User
+            name: {{ lab_admin_username }}
+        MANIFEST
+
+        result="$(oc --kubeconfig "$kubeconfig" auth can-i '*' '*' --as={{ lab_admin_username | quote }})"
+        if [[ "$result" != yes ]]; then
+          echo "ERROR: {{ lab_admin_username }} does not have cluster-admin rights on {{ item.name }}." >&2
+          exit 1
+        fi
+        echo "READY: {{ item.name }} user={{ lab_admin_username }} cluster-admin=yes"
+      args:
+        executable: /bin/bash
+      loop: "{{ hcp_tenants }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: hcp_lab_admin_rbac_results
+      changed_when: "'READY:' in hcp_lab_admin_rbac_results.stdout"
+
+    - name: Print HCP shared administrator RBAC results
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ hcp_lab_admin_rbac_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

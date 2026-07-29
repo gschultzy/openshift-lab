@@ -1,0 +1,36 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: {{ lab_admin_hcp_rbac_policy_name }}
+  namespace: {{ lab_admin_policy_namespace }}
+  annotations:
+    policy.open-cluster-management.io/standards: OpenShift lab access
+    policy.open-cluster-management.io/categories: RBAC
+    policy.open-cluster-management.io/controls: HCP shared lab cluster administrator
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: {{ lab_admin_hcp_rbac_policy_name }}
+        spec:
+          remediationAction: enforce
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: rbac.authorization.k8s.io/v1
+                kind: ClusterRoleBinding
+                metadata:
+                  name: {{ lab_admin_cluster_admin_binding_name }}
+                roleRef:
+                  apiGroup: rbac.authorization.k8s.io
+                  kind: ClusterRole
+                  name: cluster-admin
+                subjects:
+                  - apiGroup: rbac.authorization.k8s.io
+                    kind: User
+                    name: {{ lab_admin_username }}

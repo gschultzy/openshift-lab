@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ lab_admin_policy_namespace }}
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: {{ lab_admin_standard_placement_name }}
+  namespace: {{ lab_admin_policy_namespace }}
+spec:
+  clusterSelector:
+    matchLabels:
+      {{ lab_admin_standard_cluster_label_key }}: "{{ lab_admin_cluster_label_value }}"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ lab_admin_standard_binding_name }}
+  namespace: {{ lab_admin_policy_namespace }}
+placementRef:
+  apiGroup: apps.open-cluster-management.io
+  kind: PlacementRule
+  name: {{ lab_admin_standard_placement_name }}
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: {{ lab_admin_standard_policy_name }}
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+  name: {{ lab_admin_hcp_placement_name }}
+  namespace: {{ lab_admin_policy_namespace }}
+spec:
+  clusterSelector:
+    matchLabels:
+      {{ lab_admin_hcp_cluster_label_key }}: "{{ lab_admin_cluster_label_value }}"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: {{ lab_admin_hcp_binding_name }}
+  namespace: {{ lab_admin_policy_namespace }}
+placementRef:
+  apiGroup: apps.open-cluster-management.io
+  kind: PlacementRule
+  name: {{ lab_admin_hcp_placement_name }}
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: {{ lab_admin_hcp_rbac_policy_name }}

@@ -102,4 +102,6 @@ run_playbook playbooks/05_install_lvm_storage.yml
 run_playbook playbooks/06_install_acm.yml
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
+# Configure the shared HTPasswd administrator on the hub and any existing spokes.
+run_playbook playbooks/07_configure_lab_admin.yml
 run_playbook playbooks/06_enable_acm_virtualization.yml

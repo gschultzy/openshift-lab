@@ -325,7 +325,8 @@ The HCP workflow:
 6. Applies the required HyperShift, KubeVirt, networking, pull-secret, and storage prerequisites.
 7. Creates each `HostedCluster` and `NodePool` on its assigned hosting site.
 8. Uses the site-local Portworx storage classes for HCP etcd, worker root disks, and tenant data disks.
-9. Waits for the tenant admin kubeconfig secrets, exports them, and imports all HCP tenants into RHACM.
+9. Configures the shared HTPasswd administrator on every HostedCluster and grants guest `cluster-admin` rights.
+10. Waits for the tenant admin kubeconfig secrets, exports them, imports all HCP tenants into RHACM, and labels them for continuous RBAC enforcement.
 
 Exported HCP kubeconfigs are stored under:
 
@@ -333,10 +334,25 @@ Exported HCP kubeconfigs are stored under:
 build/lab-sno/hcp-kubeconfigs/
 ```
 
-Apply the optional HTPasswd tenant authentication policy:
+The shared lab administrator is configured automatically by `run.sh`, `run-full-hub-and-spoke.sh`, and `hcp-create.sh`.
+The requested Pod 74 defaults are:
+
+```text
+username: admin
+password: Password1!
+```
+
+To reconcile the account independently without rebuilding any cluster:
 
 ```bash
-./scripts/apply-hcp-tenant-htpasswd-policy.sh
+./scripts/configure-lab-admin.sh
+```
+
+For a persistent environment, override the defaults in the encrypted Vault file:
+
+```yaml
+vault_cluster_admin_username: "admin"
+vault_cluster_admin_password: "CHANGE_ME"
 ```
 
 Delete all HCP tenants when required:
@@ -344,6 +360,18 @@ Delete all HCP tenants when required:
 ```bash
 ./scripts/hcp-delete.sh
 ```
+
+
+## Shared administrator architecture
+
+The repository uses a hybrid model:
+
+- RHACM Governance continuously enforces the HTPasswd Secret, OAuth provider, and `cluster-admin` binding on `local-cluster`, Site-A, and Site-B.
+- HCP OAuth is configured on each hosting-cluster `HostedCluster` resource.
+- HCP guest RBAC is applied through the exported system-admin kubeconfig and then continuously enforced after each guest is imported into RHACM.
+- The bcrypt htpasswd entry is stored in `Secret/lab-admin-policies/lab-admin-htpasswd-source` on the hub. A password checksum prevents a new random bcrypt salt from forcing OAuth rollouts on every idempotent run.
+
+The default password is intentionally suitable only for this isolated lab.
 
 ## Verify the Complete Environment
 

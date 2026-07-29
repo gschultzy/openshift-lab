@@ -234,6 +234,7 @@ echo "HCP operator source:    RHACM/MCE hypershift-addon"
 echo "Add-on wait timeout:    ${HCP_HYPERSHIFT_ADDON_WAIT_TIMEOUT_SECONDS}s"
 echo "Portworx wait timeout:  ${HCP_PORTWORX_WAIT_TIMEOUT_SECONDS}s"
 echo "Pure API tokens:       Vault token, otherwise existing generated token files"
+echo "Shared admin user:     admin (password from Vault/lab default)"
 echo
 echo "Tenants:"
 hcp_tenants | while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
@@ -243,6 +244,8 @@ done
 
 ./scripts/fix-acm-hypershift-local-hosting.sh
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/17_validate_hub_context.yml
+# Reconcile the shared administrator on the hub and physical hosting clusters.
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/07_configure_lab_admin.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/18_check_spoke_mce_conflicts.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/17_configure_acm_mce_integration.yml
 ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" playbooks/16_ensure_hypershift_operator_on_spokes.yml
@@ -302,6 +305,10 @@ while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_
   ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" "${COMMON_EXTRA_VARS[@]}" "${vars[@]}" "$(hcp_tenant_playbook "$site")"
 done < <(hcp_tenants_for_site "$ENV_SITE_B_CLUSTER_NAME")
 
+# Configure the same HTPasswd identity provider through each HostedCluster.
+say "Configure shared administrator OAuth on HCP tenants"
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/29_configure_hcp_lab_admin.yml
+
 say "Wait for tenant admin kubeconfig secrets"
 while IFS='|' read -r site name mc cluster_cidr service_cidr extra_disks tenant_px_sc guest_sc; do
   site_kubeconfig="$(hcp_tenant_site_kubeconfig "$site" "$ROOT_DIR")"
@@ -313,6 +320,10 @@ HCP_KUBECONFIG_OUT_DIR="$HCP_KUBECONFIG_OUT_DIR" \
 HCP_NAMESPACE="$HCP_NAMESPACE" \
 ./scripts/export-hcp-kubeconfigs.sh
 
+# Grant cluster-admin inside every guest before RHACM import.
+say "Grant shared administrator cluster-admin rights on HCP guests"
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/30_grant_hcp_lab_admin.yml
+
 say "Import HCP guest clusters into RHACM"
 HUB_KUBECONFIG="$HUB_KUBECONFIG" \
 HCP_KUBECONFIG_OUT_DIR="$HCP_KUBECONFIG_OUT_DIR" \
@@ -320,6 +331,9 @@ HCP_IMPORT_SKIP_NOT_READY="$HCP_IMPORT_SKIP_NOT_READY" \
 HCP_IMPORT_WAIT="$HCP_IMPORT_WAIT" \
 HCP_IMPORT_FORCE_CLEANUP="$HCP_IMPORT_FORCE_CLEANUP" \
 ./scripts/import-hcp-guests-to-hub.sh
+
+# Label imported HCP ManagedClusters and enforce the RBAC-only policy continuously.
+ansible-playbook -i "$INV" "${VAULT_ARGS[@]}" playbooks/07_configure_lab_admin.yml
 
 say "Final RHACM import check"
 ./scripts/check-hcp-guest-imports.sh || true
@@ -340,6 +354,7 @@ Useful checks:
   oc --kubeconfig "$SITE_A_KUBECONFIG" -n "$HCP_NAMESPACE" get hostedcluster,nodepool
   oc --kubeconfig "$SITE_B_KUBECONFIG" -n "$HCP_NAMESPACE" get hostedcluster,nodepool
   ls -1 "$HCP_KUBECONFIG_OUT_DIR"/*.kubeconfig
+  oc --kubeconfig "$HUB_KUBECONFIG" -n lab-admin-policies get policy,placementrule,placementbinding
 
 Delete all HCP tenants with:
   ./scripts/hcp-delete.sh

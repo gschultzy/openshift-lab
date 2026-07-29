@@ -1,0 +1,289 @@
+---
+- name: Configure a shared HTPasswd cluster administrator through RHACM
+  hosts: localhost
+  gather_facts: false
+  vars:
+    lab_admin_policy_templates:
+      - templates/lab-admin-policies/00-placement-and-bindings.yaml.j2
+      - templates/lab-admin-policies/01-standard-cluster-admin-policy.yaml.j2
+      - templates/lab-admin-policies/02-hcp-cluster-admin-policy.yaml.j2
+  tasks:
+    - name: Confirm hub kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ hub_kubeconfig }}"
+      register: lab_admin_hub_kubeconfig_stat
+
+    - name: Stop if hub kubeconfig is missing
+      ansible.builtin.fail:
+        msg: "Hub kubeconfig not found at {{ hub_kubeconfig }}."
+      when: not lab_admin_hub_kubeconfig_stat.stat.exists
+
+    - name: Validate shared administrator playbook is running against the hub
+      ansible.builtin.command: oc --kubeconfig {{ hub_kubeconfig | quote }} whoami --show-server
+      register: lab_admin_hub_api
+      changed_when: false
+
+    - name: Stop when the supplied kubeconfig is not the lab-sno hub
+      ansible.builtin.fail:
+        msg: |
+          Refusing to configure fleet authentication against the wrong cluster.
+          Current API: {{ lab_admin_hub_api.stdout }}
+          Expected: api.{{ cluster_name }}.{{ base_domain }}
+      when: "'api.' ~ cluster_name ~ '.' ~ base_domain not in lab_admin_hub_api.stdout"
+
+    - name: Prepare stable shared administrator credentials
+      ansible.builtin.include_tasks: tasks/prepare_lab_admin_credentials.yml
+
+    - name: Bootstrap shared administrator directly on reachable standard clusters
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubeconfig={{ item.kubeconfig | quote }}
+        cluster={{ item.name | quote }}
+
+        if [[ ! -s "$kubeconfig" ]] || ! timeout 20 oc --kubeconfig "$kubeconfig" get clusterversion version >/dev/null 2>&1; then
+          echo "Deferred until cluster is reachable: $cluster"
+          exit 0
+        fi
+
+        jq -n \
+          --arg name {{ lab_admin_htpasswd_secret_name | quote }} \
+          --arg htpasswd "$LAB_ADMIN_HTPASSWD_B64" \
+          '{
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {namespace: "openshift-config", name: $name},
+            type: "Opaque",
+            data: {htpasswd: $htpasswd}
+          }' | oc --kubeconfig "$kubeconfig" apply -f -
+
+        providers="$(
+          oc --kubeconfig "$kubeconfig" get oauth cluster -o json |
+          jq -c \
+            --arg idp {{ lab_admin_idp_name | quote }} \
+            --arg secret {{ lab_admin_htpasswd_secret_name | quote }} '
+              (.spec.identityProviders // [])
+              | map(select(.name != $idp))
+              + [{
+                  name: $idp,
+                  mappingMethod: "add",
+                  type: "HTPasswd",
+                  htpasswd: {fileData: {name: $secret}}
+                }]
+            '
+        )"
+        patch="$(jq -nc --argjson providers "$providers" '{spec:{identityProviders:$providers}}')"
+        oc --kubeconfig "$kubeconfig" patch oauth cluster --type=merge -p "$patch"
+
+        cat <<MANIFEST | oc --kubeconfig "$kubeconfig" apply -f -
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: {{ lab_admin_cluster_admin_binding_name }}
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+          - apiGroup: rbac.authorization.k8s.io
+            kind: User
+            name: {{ lab_admin_username }}
+        MANIFEST
+
+        echo "CONFIGURED: $cluster"
+      args:
+        executable: /bin/bash
+      environment:
+        LAB_ADMIN_HTPASSWD_B64: "{{ lab_admin_htpasswd_file_b64 }}"
+      loop:
+        - name: local-cluster
+          kubeconfig: "{{ hub_kubeconfig }}"
+        - name: "{{ bm_cluster_name }}"
+          kubeconfig: "{{ site_a_kubeconfig_file }}"
+        - name: "{{ site_b_cluster_name }}"
+          kubeconfig: "{{ site_b_kubeconfig_file }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: lab_admin_standard_bootstrap
+      changed_when: "'CONFIGURED:' in lab_admin_standard_bootstrap.stdout"
+      no_log: true
+
+    - name: Label currently available hub and physical spoke ManagedClusters
+      ansible.builtin.shell: |
+        set -euo pipefail
+        changed=0
+        for cluster in {{ lab_admin_standard_managed_clusters | join(' ') }}; do
+          if oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster "$cluster" >/dev/null 2>&1; then
+            current="$(oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster "$cluster" -o json | jq -r --arg key {{ lab_admin_standard_cluster_label_key | quote }} '.metadata.labels[$key] // ""')"
+            if [[ "$current" != {{ lab_admin_cluster_label_value | quote }} ]]; then
+              oc --kubeconfig {{ hub_kubeconfig | quote }} label managedcluster "$cluster" \
+                {{ lab_admin_standard_cluster_label_key }}={{ lab_admin_cluster_label_value }} --overwrite
+              changed=1
+            else
+              echo "Already labeled: $cluster"
+            fi
+          else
+            echo "Deferred until ManagedCluster exists: $cluster"
+          fi
+        done
+        if [[ "$changed" == 1 ]]; then
+          echo 'LAB_ADMIN_STANDARD_LABELS_CHANGED=true'
+        fi
+      args:
+        executable: /bin/bash
+      register: lab_admin_standard_labels
+      changed_when: "'LAB_ADMIN_STANDARD_LABELS_CHANGED=true' in lab_admin_standard_labels.stdout"
+
+    - name: Label currently imported HCP ManagedClusters for RBAC reconciliation
+      ansible.builtin.shell: |
+        set -euo pipefail
+        changed=0
+        for cluster in {{ lab_admin_hcp_managed_clusters | join(' ') }}; do
+          if oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster "$cluster" >/dev/null 2>&1; then
+            current="$(oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster "$cluster" -o json | jq -r --arg key {{ lab_admin_hcp_cluster_label_key | quote }} '.metadata.labels[$key] // ""')"
+            if [[ "$current" != {{ lab_admin_cluster_label_value | quote }} ]]; then
+              oc --kubeconfig {{ hub_kubeconfig | quote }} label managedcluster "$cluster" \
+                {{ lab_admin_hcp_cluster_label_key }}={{ lab_admin_cluster_label_value }} --overwrite
+              changed=1
+            else
+              echo "Already labeled: $cluster"
+            fi
+          else
+            echo "Deferred until HCP import completes: $cluster"
+          fi
+        done
+        if [[ "$changed" == 1 ]]; then
+          echo 'LAB_ADMIN_HCP_LABELS_CHANGED=true'
+        fi
+      args:
+        executable: /bin/bash
+      register: lab_admin_hcp_labels
+      changed_when: "'LAB_ADMIN_HCP_LABELS_CHANGED=true' in lab_admin_hcp_labels.stdout"
+
+    - name: Create rendered shared administrator policy directory
+      ansible.builtin.file:
+        path: "{{ lab_admin_policy_rendered_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Remove rendered shared administrator policies from previous runs
+      ansible.builtin.shell: |
+        set -euo pipefail
+        rm -f {{ lab_admin_policy_rendered_dir | quote }}/*.yaml
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Render shared administrator RHACM policies
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "{{ lab_admin_policy_rendered_dir }}/{{ item | basename | regex_replace('\\.j2$', '') }}"
+        mode: "0600"
+      loop: "{{ lab_admin_policy_templates }}"
+      no_log: true
+
+    - name: Validate rendered shared administrator policies against the RHACM API
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for manifest in {{ lab_admin_policy_rendered_dir | quote }}/*.yaml; do
+          echo "Server-validating $(basename "$manifest")"
+          oc --kubeconfig {{ hub_kubeconfig | quote }} apply --dry-run=server -f "$manifest" >/dev/null
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Validate RHACM PlacementRule label selectors are strings
+      ansible.builtin.shell: |
+        set -euo pipefail
+        manifest={{ lab_admin_policy_rendered_dir | quote }}/00-placement-and-bindings.yaml
+        python3 - "$manifest" <<'PY'
+        import sys
+        import yaml
+
+        path = sys.argv[1]
+        with open(path, encoding="utf-8") as stream:
+            documents = list(yaml.safe_load_all(stream))
+
+        failures = []
+        for document in documents:
+            if not isinstance(document, dict) or document.get("kind") != "PlacementRule":
+                continue
+            name = document.get("metadata", {}).get("name", "<unknown>")
+            labels = document.get("spec", {}).get("clusterSelector", {}).get("matchLabels", {})
+            for key, value in labels.items():
+                if not isinstance(value, str):
+                    failures.append(f"PlacementRule/{name} matchLabels[{key!r}] must be a string, got {type(value).__name__}")
+
+        if failures:
+            print("ERROR: invalid RHACM label selector values:", file=sys.stderr)
+            for failure in failures:
+                print(f"  - {failure}", file=sys.stderr)
+            sys.exit(1)
+        PY
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Apply shared administrator policies to RHACM hub
+      ansible.builtin.shell: |
+        set -euo pipefail
+        changed=0
+        for manifest in {{ lab_admin_policy_rendered_dir | quote }}/*.yaml; do
+          echo "Applying $(basename "$manifest")"
+          output="$(oc --kubeconfig {{ hub_kubeconfig | quote }} apply -f "$manifest")"
+          printf '%s\n' "$output"
+          if grep -Eq '(created|configured)$' <<<"$output"; then
+            changed=1
+          fi
+        done
+        if [[ "$changed" == 1 ]]; then
+          echo 'LAB_ADMIN_POLICIES_CHANGED=true'
+        fi
+      args:
+        executable: /bin/bash
+      register: lab_admin_policy_apply
+      changed_when: "'LAB_ADMIN_POLICIES_CHANGED=true' in lab_admin_policy_apply.stdout"
+
+    - name: Wait for shared administrator resources on the hub cluster
+      ansible.builtin.shell: |
+        set -euo pipefail
+        for attempt in $(seq 1 {{ lab_admin_policy_wait_retries | int }}); do
+          if oc --kubeconfig {{ hub_kubeconfig | quote }} -n openshift-config get secret {{ lab_admin_htpasswd_secret_name }} >/dev/null 2>&1 \
+             && oc --kubeconfig {{ hub_kubeconfig | quote }} get oauth cluster >/dev/null 2>&1 \
+             && oc --kubeconfig {{ hub_kubeconfig | quote }} get clusterrolebinding {{ lab_admin_cluster_admin_binding_name }} >/dev/null 2>&1; then
+            provider="$(oc --kubeconfig {{ hub_kubeconfig | quote }} get oauth cluster -o json | jq -r --arg name {{ lab_admin_idp_name | quote }} '[.spec.identityProviders[]? | select(.name == $name)] | length')"
+            if [[ "$provider" == 1 ]]; then
+              echo "READY: shared administrator authentication is configured on the hub."
+              exit 0
+            fi
+          fi
+          if (( attempt == 1 || attempt % 12 == 0 )); then
+            echo "Waiting for hub shared administrator policy: ${attempt}/{{ lab_admin_policy_wait_retries | int }}"
+            oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ lab_admin_policy_namespace }} get policy,placementrule,placementbinding 2>/dev/null || true
+          fi
+          sleep {{ lab_admin_policy_wait_delay_seconds | int }}
+        done
+        echo 'ERROR: Timed out waiting for shared administrator authentication on the hub.' >&2
+        exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Show shared administrator fleet policy status
+      ansible.builtin.shell: |
+        set -euo pipefail
+        echo '# Selected managed clusters'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} get managedcluster \
+          -L {{ lab_admin_standard_cluster_label_key }},{{ lab_admin_hcp_cluster_label_key }}
+        echo
+        echo '# Shared administrator policies'
+        oc --kubeconfig {{ hub_kubeconfig | quote }} -n {{ lab_admin_policy_namespace }} \
+          get policy,placementrule,placementbinding
+      args:
+        executable: /bin/bash
+      register: lab_admin_policy_status
+      changed_when: false
+
+    - name: Print shared administrator fleet policy status
+      ansible.builtin.debug:
+        var: lab_admin_policy_status.stdout_lines

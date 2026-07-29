@@ -433,7 +433,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.81
-    boot_mac: "BC:97:E1:6E:5E:E0"
+    boot_mac: "CHANGE_ME_B10_30_BOOT_NIC_MAC"
     ip: 10.23.74.110
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -444,7 +444,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.82
-    boot_mac: "BC:97:E1:6E:40:C0"
+    boot_mac: "CHANGE_ME_B10_31_BOOT_NIC_MAC"
     ip: 10.23.74.111
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -455,7 +455,7 @@ bm_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.83
-    boot_mac: "BC:97:E1:C3:F1:C0"
+    boot_mac: "CHANGE_ME_B10_33_BOOT_NIC_MAC"
     ip: 10.23.74.112
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -509,7 +509,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.84
-    boot_mac: "BC:97:E1:6E:6C:10"
+    boot_mac: "CHANGE_ME_B10_34_BOOT_NIC_MAC"
     ip: 10.23.74.113
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -520,7 +520,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.85
-    boot_mac: "BC:97:E1:C3:F6:80"
+    boot_mac: "CHANGE_ME_B10_35_BOOT_NIC_MAC"
     ip: 10.23.74.114
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -531,7 +531,7 @@ site_b_nodes:
     role: master
     enabled: true
     bmc_ip: 10.23.74.86
-    boot_mac: "BC:97:E1:C3:F7:00"
+    boot_mac: "CHANGE_ME_B10_36_BOOT_NIC_MAC"
     ip: 10.23.74.115
     primary_interface: eno33np0
     secondary_interface: eno34np1
@@ -978,16 +978,52 @@ portworx_pure_sites:
     pod: "{{ site_b_pure_flasharray_pod }}"
 
 # ---------------------------------------------------------------------------
-# HCP tenant authentication policy
+# Shared lab administrator authentication
 # ---------------------------------------------------------------------------
-# Applies HTPasswd OAuth to the HostedCluster resources on Site-A/Site-B.
-# In HCP, OAuth configuration is synced from the hosting cluster via the
-# HostedCluster resource, not by patching OAuth directly inside the guest cluster.
-hcp_tenant_policy_namespace: hcp-tenant-auth-policies
+# HTPasswd is used only for this isolated Pod 74 lab. The requested credentials
+# work immediately after the ZIP is overlaid. Defining the two Vault variables
+# below overrides these defaults without changing the repository.
+lab_admin_enabled: true
+lab_admin_username: "{{ vault_cluster_admin_username | default('admin', true) }}"
+lab_admin_password: "{{ vault_cluster_admin_password | default('Password1!', true) }}"
+lab_admin_idp_name: local-htpasswd
+lab_admin_htpasswd_secret_name: lab-admin-htpasswd
+lab_admin_cluster_admin_binding_name: lab-admin-cluster-admin
+
+# RHACM policy source and placement.
+lab_admin_policy_namespace: lab-admin-policies
+lab_admin_policy_rendered_dir: "{{ build_root }}/lab-admin-policies"
+lab_admin_source_secret_name: lab-admin-htpasswd-source
+lab_admin_password_checksum_annotation: openshift-lab.redhat.com/password-checksum
+lab_admin_standard_policy_name: lab-admin-auth
+lab_admin_hcp_rbac_policy_name: lab-admin-hcp-rbac
+lab_admin_standard_placement_name: lab-admin-standard
+lab_admin_standard_binding_name: lab-admin-standard-binding
+lab_admin_hcp_placement_name: lab-admin-hcp
+lab_admin_hcp_binding_name: lab-admin-hcp-binding
+lab_admin_standard_cluster_label_key: openshift-lab.redhat.com/admin-standard
+lab_admin_hcp_cluster_label_key: openshift-lab.redhat.com/admin-hcp
+lab_admin_cluster_label_value: "true"
+lab_admin_policy_wait_retries: 120
+lab_admin_policy_wait_delay_seconds: 5
+
+# Standard OpenShift clusters receive the HTPasswd Secret, OAuth provider and
+# cluster-admin binding through RHACM Governance. Missing clusters are deferred
+# and labeled automatically on a later idempotent run.
+lab_admin_standard_managed_clusters:
+  - local-cluster
+  - "{{ bm_cluster_name }}"
+  - "{{ site_b_cluster_name }}"
+
+# HCP guest OAuth is managed on each HostedCluster resource. After import, an
+# RHACM RBAC-only policy continuously enforces the cluster-admin binding.
+lab_admin_hcp_managed_clusters: "{{ hcp_tenants | map(attribute='managed_cluster_name') | list }}"
+
+# Compatibility aliases retained for the existing HCP tenant-auth scripts and
+# templates. They now use the shared administrator credentials above.
+hcp_tenant_policy_namespace: "{{ lab_admin_policy_namespace }}"
 hcp_tenant_policy_rendered_dir: "{{ build_root }}/hcp-tenant-auth-policies"
 hcp_tenant_policy_remediation_action: enforce
-
-# Hosting clusters that own the HostedCluster resources.
 hcp_tenant_site_a_hosting_placement_name: hcp-tenant-auth-site-a-hosting
 hcp_tenant_site_b_hosting_placement_name: hcp-tenant-auth-site-b-hosting
 hcp_tenant_site_a_hosting_binding_name: hcp-tenant-auth-site-a-hosting-binding
@@ -998,30 +1034,20 @@ hcp_tenant_site_b_hosting_label_key: hcp-tenant-auth-site-b
 hcp_tenant_site_b_hosting_label_value: "true"
 hcp_tenant_site_a_oauth_policy_name: site-a-hcp-tenants-htpasswd-oauth
 hcp_tenant_site_b_oauth_policy_name: site-b-hcp-tenants-htpasswd-oauth
-site_a_hcp_htpasswd_secret_name: htpasswd-site-a-hcp-tenants
-site_b_hcp_htpasswd_secret_name: htpasswd-site-b-hcp-tenants
-
-# Legacy v18 tenant-policy names kept only so the v19 playbook can remove the
-# old tenant-targeted RBAC policy wiring if it exists.
+site_a_hcp_htpasswd_secret_name: "{{ lab_admin_htpasswd_secret_name }}"
+site_b_hcp_htpasswd_secret_name: "{{ lab_admin_htpasswd_secret_name }}"
 hcp_tenant_clusterset: hcp-tenants
 hcp_tenant_policy_placement_name: hcp-tenant-auth-placement
 hcp_tenant_policy_binding_name: hcp-tenant-auth-binding
 hcp_tenant_policy_cluster_label_key: hcp-tenant-auth
 hcp_tenant_policy_cluster_label_value: "true"
-hcp_tenant_cluster_admin_policy_name: hcp-tenant-admin-cluster-admin
-hcp_tenant_managed_clusters:
-  - site-a-hcp-t1-px
-  - site-a-hcp-t2-kv
-  - site-b-hcp-t1-px
-  - site-b-hcp-t2-kv
+hcp_tenant_cluster_admin_policy_name: "{{ lab_admin_hcp_rbac_policy_name }}"
+hcp_tenant_cluster_admin_binding_name: "{{ lab_admin_cluster_admin_binding_name }}"
+hcp_tenant_managed_clusters: "{{ lab_admin_hcp_managed_clusters }}"
 hcp_tenant_required_managed_clusters:
   - "{{ bm_cluster_name }}"
   - "{{ site_b_cluster_name }}"
+hcp_tenant_admin_username: "{{ lab_admin_username }}"
+hcp_tenant_admin_password_note: "Password is read from Vault or the Pod 74 lab default"
+hcp_tenant_htpasswd_idp_name: "{{ lab_admin_idp_name }}"
 
-# Tenant admin credentials.
-hcp_tenant_admin_username: admin
-hcp_tenant_admin_password_note: pureuser
-hcp_tenant_htpasswd_idp_name: local-htpasswd
-# htpasswd bcrypt entry generated with: htpasswd -nbB admin pureuser
-# Secret data is base64 for: admin:$2y$05$tZC6lUchB.enLXorMDXWZO4ZRibpivHlqB0/dUXKI.3HsWYcqF/PW
-hcp_tenant_htpasswd_file_b64: YWRtaW46JDJ5JDA1JHRaQzZsVWNoQi5lbkxYb3JNRFhXWk80WlJpYnBpdkhscUIwL2RVWEtJLjNIc1dZY3FGL1BXCg==

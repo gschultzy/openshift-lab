@@ -93,6 +93,9 @@ run_playbook playbooks/06_install_acm.yml
 # Keep HCP globally enabled but do not host tenant control planes on the SNO hub.
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/fix-acm-hypershift-local-hosting.sh
 KUBECONFIG="$(hub_kubeconfig_path)" ./scripts/wait-acm-ready.sh
+# Configure the shared HTPasswd administrator on the hub. Spoke and HCP labels
+# are added automatically as those ManagedClusters become available.
+run_playbook playbooks/07_configure_lab_admin.yml
 # Enable Fleet Virtualization and fine-grained virtualization RBAC on the hub.
 # On a fresh build the spoke labels are deferred until each ManagedCluster joins.
 run_playbook playbooks/06_enable_acm_virtualization.yml
@@ -104,6 +107,8 @@ run_playbook playbooks/05_discover_idrac_nics.yml
 run_playbook playbooks/05_idrac_preflight.yml
 run_playbook playbooks/08_apply_baremetal_cluster.yml
 run_playbook playbooks/09_wait_baremetal_cluster.yml
+# Site-A is now managed; apply the shared administrator policy to it.
+run_playbook playbooks/07_configure_lab_admin.yml
 
 # Site-A ACM Governance / HCP hosting policies
 run_playbook playbooks/12_apply_site_a_hcp_policies.yml
@@ -119,6 +124,8 @@ run_playbook playbooks/05_discover_site_b_idrac_nics.yml
 run_playbook playbooks/05_idrac_preflight_site_b.yml
 run_playbook playbooks/08_apply_site_b_baremetal_cluster.yml
 run_playbook playbooks/09_wait_site_b_baremetal_cluster.yml
+# Site-B is now managed; apply the shared administrator policy to it.
+run_playbook playbooks/07_configure_lab_admin.yml
 
 # Site-B ACM Governance / HCP hosting policies
 run_playbook playbooks/12_apply_site_b_hcp_policies.yml

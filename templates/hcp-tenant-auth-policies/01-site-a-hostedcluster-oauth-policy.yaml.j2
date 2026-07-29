@@ -29,7 +29,7 @@ spec:
                   namespace: {{ site_a_hcp_namespace }}
                 type: Opaque
                 data:
-                  htpasswd: {{ hcp_tenant_htpasswd_file_b64 }}
+                  htpasswd: '{% raw %}{{hub fromSecret "{% endraw %}{{ lab_admin_policy_namespace }}{% raw %}" "{% endraw %}{{ lab_admin_source_secret_name }}{% raw %}" "htpasswd" hub}}{% endraw %}'
 {% for tenant in hcp_tenants | selectattr('site', 'equalto', 'site-a') | list %}
             - complianceType: musthave
               objectDefinition:

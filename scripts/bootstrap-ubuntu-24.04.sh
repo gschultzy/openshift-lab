@@ -23,6 +23,7 @@ fi
 
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  apache2-utils \
   ca-certificates \
   curl \
   dnsutils \

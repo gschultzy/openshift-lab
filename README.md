@@ -52,8 +52,8 @@ Each site uses only its assigned Pure FlashArray:
 
 | Site | OpenShift nodes | Pure FlashArray | Management IP |
 |---|---|---|---|
-| Site-A | `b10-30`, `b10-31`, `b10-33` | `SV16-X90R4-B10-01` | `10.23.74.50` |
-| Site-B | `b10-34`, `b10-35`, `b10-36` | `SV16-X20R4-B08-13` | `10.23.74.60` |
+| Site-A | `b10-30`, `b10-31`, `b10-33` | `SV16-X90R4-B10-01` | `< ip address >` |
+| Site-B | `b10-34`, `b10-35`, `b10-36` | `SV16-X20R4-B08-13` | `< ip address >` |
 
 Portworx provides the storage classes used by the HCP control-plane data, worker VM root disks, and optional tenant data disks. The HCP tenant clusters are then imported into RHACM so the complete environment can be viewed and managed from the hub.
 

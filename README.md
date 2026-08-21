@@ -4,7 +4,7 @@ This repository is pinned consistently to **OpenShift 4.21.25** for the SNO hub,
 
 This repository builds:
 
-- An Ubuntu 24.04 Ansible bastion.
+- An Ansible bastion.
 - A vSphere Single Node OpenShift management hub.
 - Red Hat Advanced Cluster Management and Multicluster Engine on the hub.
 - A three-node bare-metal OpenShift cluster at Site-A.

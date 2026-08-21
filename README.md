@@ -64,7 +64,7 @@ Use this order:
 1. Configure `main.yml` and `vault.yml`.
 2. Configure your pre-created Ubuntu bastion, provied with your CSC lab invite. 
 3. Deploy the SNO hub and both spoke clusters.
-4. Deploy the dedicated Portworx/Pure storage at each site.
+4. Deploy the dedicated Everpure/Portworx storage at each site.
 5. Create and import the HCP tenant clusters.
 6. Verify the complete environment from the RHACM hub.
 

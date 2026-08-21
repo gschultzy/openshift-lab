@@ -87,11 +87,11 @@ validate_certs: false
 # CompanyA / Resources / datastore1 / MGMT are retained assumptions and must be
 # verified with playbooks/00_discover_vsphere_inventory.yml before VM creation.
 # This starter creates the VM on the standalone ESXi host through vCenter.
-vsphere_datacenter: CompanyA
+vsphere_datacenter: Company-A
 vsphere_esxi_hostname: 10.23.74.11
 vsphere_resource_pool: Resources
 vsphere_folder: "/{{ vsphere_datacenter }}/vm"
-vsphere_datastore: datastore1
+vsphere_datastore: esxi-datastore
 
 # Only required when sno_install_platform: vsphere.
 # Leave unset/empty when using the default platform none mode.

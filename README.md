@@ -9,7 +9,7 @@ This repository builds:
 - Red Hat Advanced Cluster Management and Multicluster Engine on the hub.
 - A three-node bare-metal OpenShift cluster at Site-A.
 - A three-node bare-metal OpenShift cluster at Site-B.
-- A dedicated Pure FlashArray and Portworx deployment for each site.
+- A dedicated Everpure FlashArray and Portworx deployment for each site.
 - Hosted Control Plane tenant clusters running on Site-A and Site-B.
 - All spoke and HCP tenant clusters imported into RHACM on the hub.
 
@@ -48,9 +48,9 @@ The **SNO hub** is the central management cluster. It runs RHACM, MCE, and Assis
 
 **Site-A** and **Site-B** are independent OpenShift clusters. They act as the dedicated HCP hosting clusters: the Hosted Control Plane components and KubeVirt worker virtual machines run on these clusters.
 
-Each site uses only its assigned Pure FlashArray:
+Each site uses only its assigned Everpure FlashArray:
 
-| Site | OpenShift nodes | Pure FlashArray | Management IP |
+| Site | OpenShift nodes | Everpure FlashArray | Management IP |
 |---|---|---|---|
 | Site-A | `b10-30`, `b10-31`, `b10-33` | `SV16-X90R4-B10-01` | `< ip address >` |
 | Site-B | `b10-34`, `b10-35`, `b10-36` | `SV16-X20R4-B08-13` | `< ip address >` |
@@ -115,7 +115,7 @@ It contains:
 - vCenter, ESXi, datastore, and port-group settings.
 - SNO virtual machine sizing and storage.
 - Bare-metal node, iDRAC, and boot-MAC information.
-- Dedicated Site-A and Site-B Pure FlashArray settings.
+- Dedicated Site-A and Site-B Everpure FlashArray settings.
 - Portworx storage-class configuration.
 - HCP tenant names, cluster and service CIDRs, worker sizing, and storage settings.
 
@@ -142,8 +142,8 @@ This includes:
 - iDRAC credentials.
 - Red Hat pull secret.
 - SSH private material where required.
-- Site-A Pure FlashArray credentials and API token.
-- Site-B Pure FlashArray credentials and API token.
+- Site-A Everpure FlashArray credentials and API token.
+- Site-B Everpure FlashArray credentials and API token.
 - HCP tenant authentication secrets.
 
 ## Create and Manage Ansible Vault
@@ -217,7 +217,7 @@ Create an Ubuntu 24.04 VM that can reach:
 - Windows DNS.
 - All iDRAC interfaces.
 - The SNO and bare-metal OpenShift networks.
-- Both Pure FlashArray management interfaces.
+- Both Everpure FlashArray management interfaces.
 - Required Red Hat and internet repositories.
 
 Bootstrap the bastion:
@@ -268,7 +268,7 @@ The workflow is resumable. Completed hub and spoke work is skipped where possibl
 
 ## Deploy Dedicated Storage
 
-After both spokes are available, you can pre-stage Portworx against each site's assigned Pure FlashArray. This step is optional before `hcp-create.sh`; the HCP workflow now performs the same node preparation, Operator installation, StorageCluster deployment and readiness wait automatically when Portworx is not ready.
+After both spokes are available, you can pre-stage Portworx against each site's assigned Everpure FlashArray. This step is optional before `hcp-create.sh`; the HCP workflow now performs the same node preparation, Operator installation, StorageCluster deployment and readiness wait automatically when Portworx is not ready.
 
 ### Site-A
 
@@ -320,7 +320,7 @@ The HCP workflow:
 1. Confirms Site-A and Site-B are ready to host HCP.
 2. Waits for the RHACM-managed HyperShift add-ons and operators.
 3. Applies Portworx node preparation and waits for both master MachineConfigPools to finish.
-4. Installs the Portworx Operator and each site-specific Pure-backed `StorageCluster` when required.
+4. Installs the Portworx Operator and each site-specific Everpure-backed `StorageCluster` when required.
 5. Waits for the Portworx CRD, `StorageCluster` object and `status.phase=Running` on both sites.
 6. Applies the required HyperShift, KubeVirt, networking, pull-secret, and storage prerequisites.
 7. Creates each `HostedCluster` and `NodePool` on its assigned hosting site.
@@ -550,7 +550,7 @@ prints the ACM/MCE CSV and warning-event status while it waits.
 
 1. node preparation;
 2. MachineConfigPool health;
-3. Portworx Operator, Pure secret and StorageCluster;
+3. Portworx Operator, Everpure secret and StorageCluster;
 4. Portworx readiness;
 5. HCP StorageClasses and StorageProfiles.
 

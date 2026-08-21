@@ -29,12 +29,12 @@ Run all commands from the repository root.
                           /                      \
                          v                        v
               Site-A OpenShift              Site-B OpenShift
-              b10-30 / 31 / 33              b10-34 / 35 / 36
+        <node1> / <node2> / <node3>   <nodeX> / <nodeY> / <nodeZ>
               HCP hosting cluster            HCP hosting cluster
                        |                              |
                        v                              v
-             SV16-X90R4-B10-01              SV16-X20R4-B08-13
-                  10.23.74.50                     10.23.74.60
+                 <FlashArray1>                  <FlashArray1>
+                  <FA mgmt IP>                   <FA mgmt IP>
              Dedicated Portworx              Dedicated Portworx
                        |                              |
                   +----+----+                    +----+----+
